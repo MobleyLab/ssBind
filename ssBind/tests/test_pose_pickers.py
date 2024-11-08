@@ -1,3 +1,4 @@
+import os
 from typing import List
 
 import pytest
@@ -58,26 +59,20 @@ def stored_models(models: List[str], path: str) -> List[str]:
     return model_files
 
 
-def cleanup(models: List[str]) -> None:
+def cleanup(files: List[str]) -> None:
     """Clean up
 
     Args:
-        models (List[str]): Names of model sdf files
+        files (List[str]): Files to remove
     """
-    files_to_remove = models + [
-        "PC1-PC2.svg",
-        "PC1-PC3.svg",
-        "PC2-PC3.svg",
-        "PCA_Scores.csv",
-    ]
-    for file in files_to_remove:
+    for f in files:
         try:
-            os.remove(file)
+            os.remove(f)
         except OSError:
             pass
 
 
-def test_posepicker(
+def test_PCA_posepicker(
     receptor_file: str,
     conformers_file: str,
     scores_file: str,
@@ -94,9 +89,35 @@ def test_posepicker(
         stored_models (List[str]): Paths to reference sdf files for comparison
     """
 
-    cleanup(models)
-    picker = PosePicker(receptor_file)
+    files = models + ["PC1-PC2.svg", "PC1-PC3.svg", "PC2-PC3.svg"]
+
+    cleanup(files)
+    picker = PCAPosePicker(receptor_file)
     picker.pick_poses(conformers_file, scores_file)
+    for f in files:
+        assert os.path.isfile(f)
     for model, stored_model in zip(models, stored_models):
         assert files_equal(model, stored_model)
-    cleanup(models)
+    cleanup(files)
+
+
+def test_torsion_posepicker(conformers_file: str, scores_file: str) -> None:
+    """Test clustering of conformers and selecting model posees
+
+    Args:
+        conformers_file (str): Path to minimized_conformers.sdf
+        scores_file (str): Path to Scores.csv
+    """
+
+    files = [
+        "model_1.sdf",
+        "model_2.sdf",
+        "cluster_info.csv",
+    ]
+
+    cleanup(files)
+    picker = TorsionPosePicker(dG_threshold=1.0)
+    picker.pick_poses(conformers_file, scores_file)
+    for f in files:
+        assert os.path.isfile(f)
+    cleanup(files)

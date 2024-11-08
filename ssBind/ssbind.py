@@ -9,7 +9,7 @@ import MDAnalysis as mda
 from ssBind.filter import ConformerFilter
 from ssBind.generator import *
 from ssBind.minimizer import *
-from ssBind.posepicker import PosePicker
+from ssBind.posepicker import *
 
 # Substructure-based alternative BINDing modes generator for protein-ligand systems
 
