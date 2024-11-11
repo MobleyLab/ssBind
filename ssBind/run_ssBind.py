@@ -88,7 +88,14 @@ def ParserOptions():
         dest="openmm_flex",
         help="Treat protein as flexible upon OpenMM minimization",
         type=bool,
-        default=True,
+        default=False,
+    )
+    parser.add_argument(
+        "--clustering",
+        dest="posepicker",
+        help="Conformer clustering algorithm",
+        choices=["PCA", "Torsion"],
+        default="PCA",
     )
     parser.add_argument(
         "--flexDist",
@@ -151,20 +158,8 @@ def main(args, nprocs):
 
     ssbind.generate_conformers()
 
-    flex_minimize = (
-        (args.minimize is not None)
-        and (args.minimize == "openmm")
-        and (args.openmm_flex)
-    )
-
-    if args.generator in ["rdkit", "angle"] and not flex_minimize:
-        ssbind.filter_conformers()
-        conformers = "filtered.sdf"
-    else:
-        conformers = "conformers.sdf"
-
     if args.minimize is not None:
-        ssbind.run_minimization(conformers=conformers)
+        ssbind.run_minimization(conformers="conformers.sdf")
 
     conformers_map = {
         "smina": "minimized_conformers.sdf",

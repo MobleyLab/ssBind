@@ -42,29 +42,55 @@ def receptor_file_mol2(path: str) -> str:
 
 
 @pytest.fixture
-def reference(path: str) -> Mol:
+def reference_file(path: str) -> str:
     """Reference substructure as Rdkit mol
 
     Args:
         path (str): Path to tests directory
 
     Returns:
-        Mol: Reference substructure
+        str: reference.mol file incl. absolute path
     """
-    return Chem.MolFromMol2File(os.path.join(path, "data/reference.mol2"))
+    return os.path.join(path, "data/reference.mol2")
 
 
 @pytest.fixture
-def ligand(path: str) -> Mol:
-    """Ligand as Rdkit mol
+def reference(reference_file: str) -> Mol:
+    """Reference substructure as Rdkit mol
+
+    Args:
+        path (str): Path to reference.mol
+
+    Returns:
+        Mol: Reference substructure
+    """
+    return Chem.MolFromMol2File(reference_file)
+
+
+@pytest.fixture
+def ligand_file(path: str) -> str:
+    """Ligand file as absolute path
 
     Args:
         path (str): Path to tests directory
 
     Returns:
+        str: Absolute path to ligand
+    """
+    return os.path.join(path, "data/ligand.mol2")
+
+
+@pytest.fixture
+def ligand(ligand_file: str) -> Mol:
+    """Ligand as Rdkit mol
+
+    Args:
+        ligand_file (str): Absolute path to ligand
+
+    Returns:
         Mol: Ligand
     """
-    return Chem.MolFromMol2File(os.path.join(path, "data/ligand.mol2"))
+    return Chem.MolFromMol2File(ligand_file)
 
 
 def canonSmiles(mol: Mol) -> str:

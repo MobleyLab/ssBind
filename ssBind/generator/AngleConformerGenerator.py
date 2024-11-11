@@ -15,14 +15,19 @@ class AngleConformerGenerator(ConformerGenerator):
 
     def __init__(
         self,
+        receptor_file: str,
         query_molecule: str,
         reference_substructure: str,
         degree=60,
+        seed=0,
         **kwargs,
     ) -> None:
-        super().__init__(query_molecule, reference_substructure, **kwargs)
+        super().__init__(
+            receptor_file, query_molecule, reference_substructure, **kwargs
+        )
 
         self._degree = degree
+        self._seed = seed
 
     def generate_conformers(self) -> None:
         """Generate conformers unsing angle sampling"""
@@ -33,6 +38,7 @@ class AngleConformerGenerator(ConformerGenerator):
         )
 
         numconf_angle = int((360 / self._degree) ** len(molDihedrals))
+        np.random.seed(self._seed)
         if numconf_angle > self._numconf:
             subsample = np.random.choice(
                 numconf_angle, size=self._numconf, replace=False, p=None
@@ -68,9 +74,11 @@ class AngleConformerGenerator(ConformerGenerator):
         molMinH = self._minimize(molH)
         molMin = Chem.RemoveHs(molMinH)
 
-        with open("conformers.sdf", "a") as outf:
-            with Chem.SDWriter(outf) as sdwriter:
-                sdwriter.write(molMin)
+        self._filtering(molMin)
+
+        # with open("conformers.sdf", "a") as outf:
+        #     with Chem.SDWriter(outf) as sdwriter:
+        #         sdwriter.write(molMin)
 
     def _get_uniqueDihedrals(self):
         """

@@ -78,12 +78,13 @@ def test_rdkit_generator(receptor_file: str, reference: Mol, ligand: Mol) -> Non
 
     cleanup()
     generator = RDkitConformerGenerator(
+        receptor_file,
         ligand,
         reference,
         nprocs=2,
-        numconf=2,
+        numconf=20,
     )
-    generate_and_test(generator, 2)
+    generate_and_test(generator, 20)
     cleanup()
 
 
@@ -98,9 +99,14 @@ def test_angle_generator(receptor_file: str, reference: Mol, ligand: Mol) -> Non
 
     cleanup()
     generator = AngleConformerGenerator(
-        ligand, reference, nprocs=1, numconf=1, degree=120
+        receptor_file,
+        ligand,
+        reference,
+        nprocs=1,
+        numconf=20,
+        degree=120,
     )
-    generate_and_test(generator, 1)
+    generate_and_test(generator, 4)
     cleanup()
 
 

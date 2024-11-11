@@ -7,15 +7,14 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 from rdkit import Chem, rdBase
-from rdkit.Chem import SDWriter
 from rdkit.Chem.rdchem import Mol
 from rdkit.Chem.rdDistGeom import GetExperimentalTorsions
 from rdkit.Chem.rdMolTransforms import GetDihedralDeg
-from spyrmsd.molecule import Molecule
-from spyrmsd.rmsd import rmsdwrapper
+
+from ssBind.posepicker.PosePicker import PosePicker
 
 
-class TorsionPosePicker:
+class TorsionPosePicker(PosePicker):
 
     kbT = 0.6  # kcal / mol - used for entropy estimation
 
@@ -25,7 +24,7 @@ class TorsionPosePicker:
         Args:
             receptor_file (str): receptor.pdb filename - we don't need it here
         """
-        self._nprocs = kwargs.get("nprocs", 1)
+        super().__init__(**kwargs)
 
         self._cutoff_angle = kwargs.get("cutoff_angle", 90)
         self._rmsd_symmetry_threshold = kwargs.get("rmsd_symmetry_threshold", 0.3)
@@ -53,7 +52,7 @@ class TorsionPosePicker:
             csv_scores (str, optional): CSV with conformer energies in kcal/mol. Defaults to "Scores.csv".
         """
 
-        confs = Chem.SDMolSupplier(conformers)
+        _, confs, _, _ = self._process_inputs(conformers)
         mols = [c for c in confs]
 
         scores = pd.read_csv(csv_scores, index_col="Index")
@@ -120,7 +119,7 @@ class TorsionPosePicker:
         """
 
         states = pd.DataFrame(
-            columns=["ID", "states", "U", "Nstates", "delta_G", "mol"]
+            columns=["ID", "U", "Nstates", "delta_G", "mol", "states"]
         )
         lowest_energy_conf = scores[scores.Score == 0].index[0]
 
@@ -152,11 +151,11 @@ class TorsionPosePicker:
             delta_G = -TorsionPosePicker.kbT * np.log(Z / ref_Z)
             g_dict = {
                 "ID": min_conf,
-                "states": ",".join([str(x) for x in g]),
                 "U": u,
                 "Nstates": int(len(g)),
                 "delta_G": delta_G,
                 "mol": confs[min_conf],
+                "states": ",".join([str(x) for x in g]),
             }
             states = pd.concat(
                 [states, pd.DataFrame([g_dict])], axis=0, ignore_index=True
@@ -178,7 +177,7 @@ class TorsionPosePicker:
             mol = row.mol
             mol.SetProp("U", str(row.U))
             mol.SetProp("delta_G", str(row.delta_G))
-            with SDWriter(f"model_{i+1}.sdf") as writer:
+            with Chem.SDWriter(f"model_{i+1}.sdf") as writer:
                 writer.write(row.mol)
 
     @staticmethod
@@ -189,7 +188,7 @@ class TorsionPosePicker:
             df_confs_scored (pd.DataFrame): Dataframe to store as csv
         """
         df_scores = df_confs_scored.drop(columns="mol")
-        df_scores.to_csv("cluster_info.csv")
+        df_scores.to_csv("cluster_info.csv", float_format="%.5f", index=False)
 
     def _getTorsionInfo(self, mol: Mol) -> Tuple[np.array, np.array]:
         """Helper function to extract torsion indices for each conformer and get dihedral angles.
@@ -264,16 +263,3 @@ class TorsionPosePicker:
         dangle = ((angles[index_mapping] - angles_ref) + 180) % 360 - 180
 
         return dangle
-
-    @staticmethod
-    def _rmsd(mol: Mol, ref: Mol) -> float:
-        """Calculate symmetry-corrected RMSD between two conformers
-
-        Args:
-            mol (Mol): conformer 1
-            ref (Mol): conformer 2
-
-        Returns:
-            float: RMSD in A
-        """
-        return rmsdwrapper(Molecule.from_rdkit(ref), Molecule.from_rdkit(mol))[0]

@@ -28,9 +28,10 @@ class PlantsConformerGenerator(ConformerGenerator):
         flexList: str = None,
         **kwargs: Dict,
     ) -> None:
-        super().__init__(query_molecule, reference_substructure, **kwargs)
+        super().__init__(
+            receptor_file, query_molecule, reference_substructure, **kwargs
+        )
 
-        self._receptor_file = receptor_file
         self._flexDist = flexDist
         self._flexList = flexList
         self._working_dir = kwargs.get("working_dir", os.path.join(os.getcwd(), "tmp"))

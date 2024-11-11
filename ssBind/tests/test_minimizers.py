@@ -128,4 +128,4 @@ def test_openmm_minimizer(receptor_file: str, ligand: Mol) -> None:
     minimizer = OpenMMinimizer(receptor_file, ligand)
     minimize_and_test(minimizer, ligand)
     u = mda.Universe("complex.pdb", "minimized_conformers.dcd")
-    cleanup_openmm()
+    # cleanup_openmm()

@@ -65,19 +65,6 @@ class SSBIND:
         numconf = self._kwargs.get("numconf")
         self._print_time("Conformer generation", start, numconf)
 
-    def filter_conformers(self):
-        """Filter conformers which have clashes etc"""
-
-        # initialize timer
-        start = time.time()
-
-        self._filter = ConformerFilter(**self._kwargs)
-        self._filter.filter_conformers()
-
-        # print elapsed time
-        numconf = self._conformer_count("conformers.sdf")
-        self._print_time("Conformer filtering", start, numconf)
-
     def run_minimization(
         self,
         conformers="conformers.sdf",
@@ -122,7 +109,15 @@ class SSBIND:
         # initialize timer
         start = time.time()
 
-        self._posepicker = PosePicker(**self._kwargs)
+        posepicker_type = self._kwargs.get("posepicker")
+
+        if posepicker_type == "PCA":
+            self._posepicker = PCAPosePicker(**self._kwargs)
+        elif posepicker_type == "Torsion":
+            self._posepicker = TorsionPosePicker(**self._kwargs)
+        else:
+            raise Exception(f"Invalid clustering method: {posepicker_type}")
+
         self._posepicker.pick_poses(conformers, scores)
 
         # print elapsed time

@@ -23,8 +23,10 @@ class RdockConformerGenerator(ConformerGenerator):
         receptor_file: str,
         **kwargs,
     ) -> None:
-        super().__init__(query_molecule, reference_substructure, **kwargs)
-        self._receptor_file = receptor_file
+        super().__init__(
+            receptor_file, query_molecule, reference_substructure, **kwargs
+        )
+
         curdir = kwargs.get("curdir", os.getcwd())
         self._working_dir = kwargs.get(
             "working_dir", os.path.join(curdir, str(uuid.uuid4()))

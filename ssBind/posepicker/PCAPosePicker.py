@@ -1,6 +1,5 @@
 import multiprocessing as mp
 from contextlib import closing
-from typing import List, Tuple
 
 import matplotlib.pyplot as plt
 import MDAnalysis as mda
@@ -9,19 +8,17 @@ import seaborn as sns
 from matplotlib.colors import LinearSegmentedColormap
 from MDAnalysis.analysis import pca
 from rdkit import Chem
-from rdkit.Chem.rdchem import Mol
 from rdkit.ML.Cluster import Butina
 from spyrmsd.molecule import Molecule
 from spyrmsd.rmsd import rmsdwrapper
 
+from ssBind.posepicker.PosePicker import PosePicker
 
-class PCAPosePicker:
-    def __init__(self, receptor_file: str, **kwargs) -> None:
 
-        self._receptor_file = receptor_file
-        self._ligand = kwargs.get("query_molecule")
-        self._nprocs = kwargs.get("nprocs", 1)
-        self._complex_topology = kwargs.get("complex_topology", "complex.pdb")
+class PCAPosePicker(PosePicker):
+    def __init__(self, **kwargs) -> None:
+
+        super().__init__(**kwargs)
 
         self._binsize = kwargs.get("bin", 0.25)
         self._distThresh = kwargs.get("distThresh", 0.5)
@@ -112,7 +109,7 @@ class PCAPosePicker:
         with closing(mp.Pool(processes=self._nprocs)) as pool:
             results = pool.map(self._calculate_rms, tasks)
 
-        dists = [rms[0] for _, _, rms in sorted(results, key=lambda x: (x[0], x[1]))]
+        dists = [rms for _, _, rms in sorted(results, key=lambda x: (x[0], x[1]))]
 
         clusts = Butina.ClusterData(
             dists, len(cids), self._distThresh, isDistData=True, reordering=True
@@ -144,7 +141,6 @@ class PCAPosePicker:
                 sdwriter.close()
             mode += 1
 
-        pcx = [PC1, PC2, PC3]
         pcs = ["PC1", "PC2", "PC3"]
 
         # creating own colormap so the contour plot pops more
@@ -175,7 +171,7 @@ class PCAPosePicker:
                     xlim=(df[f"{pcs[i]}"].min(), df[f"{pcs[i]}"].max()),
                     ylim=(df[f"{pcs[j]}"].min(), df[f"{pcs[j]}"].max()),
                 )
-                colorbar = fig.colorbar(scatter, cmap="gist_rainbow", label="Score")
+                fig.colorbar(scatter, cmap="gist_rainbow", label="Score")
                 for index, dict_i in enumerate(labels):
                     coord_index = list(dict_i.values())[0]
                 x_coord = df.loc[df.Index == coord_index, f"{pcs[i]}"]
@@ -183,50 +179,8 @@ class PCAPosePicker:
                 ax.text(x_coord, y_coord, f"{index+1}")
                 fig.savefig(f"{pcs[i]}-{pcs[j]}.svg", format="svg")
 
-    def _process_inputs(
-        self, conformers: str = "conformers.sdf"
-    ) -> Tuple[mda.Universe, List[Mol], str, bool]:
-        """Extract conformers and other information from the inputs, depending on whether
-        the protein is flexible or not.
-
-        Args:
-            conformers (str, optional): SD file with conformers. Defaults to "conformers.sdf".
-
-        Returns:
-            Tuple[mda.Universe, List[Mol], str, bool]: MDA universe, conformers, MDA selection
-            for the ligand, and flag for protein flexibility
-        """
-
-        input_format = conformers.split(".")[-1].lower()
-
-        if input_format == "dcd":
-            if self._ligand is None:
-                raise Exception(
-                    "Error: Need tp supply query_molecule for clustering a PDB!"
-                )
-
-            u = mda.Universe(self._complex_topology, conformers)
-            # elements = mda.topology.guessers.guess_types(u.atoms.names)
-            # u.add_TopologyAttr("elements", elements)
-            atoms = u.select_atoms("resname UNK")
-            confs = [atoms.convert_to("RDKIT") for _ in u.trajectory]
-
-            select = "(resname UNK) and not (name H*)"
-            flex = True
-
-        else:
-            confs = Chem.SDMolSupplier(conformers, sanitize=False)
-            u = mda.Universe(confs[0], confs)
-            select = "not (name H*)"
-            flex = False
-
-        return u, confs, select, flex
-
     @staticmethod
     def _calculate_rms(params):
         i, j, cid_i, cid_j = params
-        mol1 = Molecule.from_rdkit(cid_i)
-        mol2 = Molecule.from_rdkit(cid_j)
-        rms = rmsdwrapper(mol1, mol2)
-        # rms = GetBestRMS(cid_i, cid_j)
+        rms = PCAPosePicker._rmsd(cid_i, cid_j)
         return i, j, rms

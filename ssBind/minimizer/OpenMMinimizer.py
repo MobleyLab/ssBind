@@ -51,7 +51,7 @@ class OpenMMinimizer:
         else:
             self._platform = None
 
-        self._constrain_protein = not kwargs.get("openmm_flex", True)
+        self._constrain_protein = not kwargs.get("openmm_flex", False)
         self._calc_interaction_energy = (
             kwargs.get("openmm_score", "interaction") == "interaction"
         )
@@ -94,7 +94,7 @@ class OpenMMinimizer:
         self._simulation = simulation
 
         # minimize energy against reference ligand to speed up subsequent minimizations
-        simulation.minimizeEnergy()
+        simulation.minimizeEnergy(tolerance=0.1)
         new_positions = simulation.context.getState(getPositions=True).getPositions()
         self._protein_pos = new_positions[0 : self._n_protein]
         state = simulation.context.getState(getPositions=True)
@@ -107,9 +107,8 @@ class OpenMMinimizer:
                 output,
             )
 
-        # set up Scores.csv
-        with open(OpenMMinimizer.SCORE_FILE, "a+") as scores_file:
-            scores_file.write("Index,Score\n")
+        # energies
+        self._potEnergies = []
 
         # set up DCD file for trajectory
         dcdfile = open(OpenMMinimizer.OUTPUT_DCD, "wb")
@@ -120,6 +119,12 @@ class OpenMMinimizer:
             self._minimize_conformer(i, conformer)
 
         dcdfile.close()
+
+        # write energy
+        with open(OpenMMinimizer.SCORE_FILE, "w") as scores_file:
+            scores_file.write("Index,Score\n")
+            for index in range(len(self._potEnergies)):
+                scores_file.write(f"{index},{self._potEnergies[index]}\n")
 
     def _simulation_openmm(self, top: Topology, ligand: Molecule) -> app.Simulation:
         """Construct OpenMM simulation combining topologies of PDB (top) and ligand
@@ -248,16 +253,13 @@ class OpenMMinimizer:
         if self._calc_interaction_energy:
             potEnergy = self._interaction_energy()
         else:
-            potEnergy = state.getPotentialEnergy().value_in_unit(kilojoule / mole)
+            potEnergy = state.getPotentialEnergy().value_in_unit(kilocalories_per_mole)
 
         # DON'T write conformers and energies if they failed to minimize
         if potEnergy < 0:
             # write minimized complex
             self._dcd.writeModel(state.getPositions())
-
-            # write energy
-            with open(OpenMMinimizer.SCORE_FILE, "a+") as scores_file:
-                scores_file.write(f"{index},{potEnergy}\n")
+            self._potEnergies.append(potEnergy)
 
     def _interaction_energy(self) -> float:
         """Calculate protein-ligand interaction energy
@@ -271,7 +273,7 @@ class OpenMMinimizer:
         # fully interacting system, so minimization doesn't get messed up.
         total_nb = self._nb_energy(1, 1)
         interaction_ene = total_nb - protein_nb - ligand_nb
-        return interaction_ene.value_in_unit(kilojoule / mole)
+        return interaction_ene.value_in_unit(kilocalories_per_mole)
 
     def _nb_energy(self, protein_scale: int, ligand_scale: int) -> Quantity:
         """Calculated nonbonded energy between different interaction groups
