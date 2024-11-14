@@ -1,22 +1,17 @@
-import logging
-import re
-from io import StringIO
-from typing import List, Tuple
+from typing import List
 
 import networkx as nx
 import numpy as np
 import pandas as pd
-from rdkit import Chem, rdBase
+from rdkit import Chem
 from rdkit.Chem.rdchem import Mol
-from rdkit.Chem.rdDistGeom import GetExperimentalTorsions
 from rdkit.Chem.rdMolTransforms import GetDihedralDeg
+from rdkit.Chem.TorsionFingerprints import CalculateTorsionLists
 
 from ssBind.posepicker.PosePicker import PosePicker
 
 
 class TorsionPosePicker(PosePicker):
-
-    kbT = 0.6  # kcal / mol - used for entropy estimation
 
     def __init__(self, **kwargs) -> None:
         """Initialize pose picker.
@@ -29,18 +24,12 @@ class TorsionPosePicker(PosePicker):
         self._cutoff_angle = kwargs.get("cutoff_angle", 90)
         self._rmsd_symmetry_threshold = kwargs.get("rmsd_symmetry_threshold", 0.3)
         self._rmsd_threshold = kwargs.get("rmsd_threshold", 2.0)
-        self._dG_threshold = kwargs.get("dG_threshold", 1.0)
-
-        # initialize logger to capture information about torsions from RDKit output
-        # there is probably a better way to do this if we don't need multiplicities
-        logger = logging.getLogger("rdkit")
-        logger.handlers[0].setLevel(logging.WARN)
-        logger.handlers[0].setFormatter(
-            logging.Formatter("[RDKit] %(levelname)s:%(message)s")
+        self._dG_threshold = kwargs.get("dG_threshold", 0.6)
+        self._dG_clustering_threshold = kwargs.get("dG_clustering_threshold", 0)
+        self._dG_diff_clustering_threshold = kwargs.get(
+            "dG_diff_clustering_threshold", np.inf
         )
-
-        rdBase.LogToPythonLogger()
-        self._logger = logger
+        self._refMols = kwargs.get("ref_ligands", [])
 
     def pick_poses(
         self, conformers: str = "conformers.sdf", csv_scores: str = "Scores.csv"
@@ -55,17 +44,33 @@ class TorsionPosePicker(PosePicker):
         _, confs, _, _ = self._process_inputs(conformers)
         mols = [c for c in confs]
 
+        torsionLists, ringTorsionLists = CalculateTorsionLists(mols[0])
+        nonRingTorsions = self._flattenAndUniquifyTorsions(torsionLists)
+        ringTorsions = self._flattenAndUniquifyTorsions(ringTorsionLists)
+        torsions = nonRingTorsions + ringTorsions
+
         scores = pd.read_csv(csv_scores, index_col="Index")
-        scores["Score"] = scores.Score - min(scores.Score)
+        scores["diffToBest"] = scores.Score - min(scores.Score)
+        molsBelowThresh = scores[
+            (scores.Score < self._dG_clustering_threshold)
+            & (scores.diffToBest < self._dG_diff_clustering_threshold)
+        ].index
 
-        G = self._make_graph(mols)
-        df_confs_scored = self._estimate_fe(G, scores, mols)
+        G = self._make_graph(mols, molsBelowThresh, torsions)
+        df_clusters, df_confs = self._getStateData(G, mols, scores)
 
-        df_to_write = df_confs_scored[df_confs_scored.delta_G <= self._dG_threshold]
+        df_to_write = df_clusters[df_clusters.dGdiff <= self._dG_threshold]
         self._write_models(df_to_write)
-        self._write_data(df_confs_scored)
 
-    def _make_graph(self, confs: List[Mol]) -> nx.Graph:
+        df_clusters_to_write = df_clusters.drop(columns="mol")
+        df_clusters_to_write.to_csv(
+            "cluster_info.csv", float_format="%.5f", index=False
+        )
+        df_confs.to_csv("conf_info.csv", float_format="%.5f", index=False)
+
+    def _make_graph(
+        self, mols: List[Mol], molsBelowThresh: List[int], torsions: List[List[int]]
+    ) -> nx.Graph:
         """Construct a NetworkX graph of conformers, taking into consideration the RMSD and torion-
         based cutoffs for pairwise conformer comparison. Edges in the graph represent conformers
         which are not separated by energy barriers.
@@ -77,18 +82,20 @@ class TorsionPosePicker(PosePicker):
             nx.Graph: Graph with connected subgraphs representing FE basins
         """
 
-        mol_info = []
+        angles = []
 
-        for m in confs:
-            info = self._getTorsionInfo(m)
-            mol_info.append(info)
+        for m in mols:
+            angle = self._getAngles(m, torsions)
+            angles.append(angle)
 
-        G = nx.empty_graph(len(confs))
+        G = nx.empty_graph(len(mols))
 
-        for i1, m1 in enumerate(confs):
-            for i2, m2 in enumerate(confs[:i1]):
+        for i1 in molsBelowThresh:
+            for i2 in molsBelowThresh[:i1]:
 
-                dangle = self._calcDangle(mol_info[i1], mol_info[i2])
+                m1, m2 = mols[i1], mols[i2]
+
+                dangle = self._getAngleDiff(angles[i1], angles[i2])
                 rmsd_12 = self._rmsd(m1, m2)
 
                 no_torsion_barrier = (np.max(np.abs(dangle)) < self._cutoff_angle) and (
@@ -99,70 +106,62 @@ class TorsionPosePicker(PosePicker):
                 if no_torsion_barrier or symmetry_equivalent:
                     G.add_edge(i1, i2)
 
-        self._mol_info = mol_info
         return G
 
-    @staticmethod
-    def _estimate_fe(
-        G: nx.Graph, scores: pd.DataFrame, confs: List[Mol]
-    ) -> pd.DataFrame:
-        """Estimate free energy of each basin from the potential energy of the lowest conformer
-        and the number of conformers in each basin.
+    def _getStateData(self, G: nx.Graph, mols: List[Mol], scores: pd.DataFrame):
+        states = pd.DataFrame(columns=["ID", "dG", "dGdiff", "Nstates", "mol"])
 
-        Args:
-            G (nx.Graph): Graph with conformers
-            scores (pd.DataFrame): Potential energy for each conformer
-            confs (List[Mol]): conformers
-
-        Returns:
-            pd.DataFrame: Representative conformers for each basin, ranked by estimated delta G
-        """
-
-        states = pd.DataFrame(
-            columns=["ID", "U", "Nstates", "delta_G", "mol", "states"]
+        refs = self._refMols
+        mol_data = pd.DataFrame(
+            columns=["ID", "dG", "dGdiff", "clusterID", "cluster_dG", "cluster_dGdiff"]
+            + [f"rmsd_{i+1}" for i in range(len(refs))]
         )
-        lowest_energy_conf = scores[scores.Score == 0].index[0]
-
-        ref_state = [g for g in nx.connected_components(G) if lowest_energy_conf in g][
-            0
-        ]
-        # ref_Z = len(
-        #     ref_state
-        # )  # approx partition function by the number of confs in this state
-        ref_Z = sum(
-            [
-                np.exp(-scores.iloc[conf].Score / TorsionPosePicker.kbT)
-                for conf in ref_state
-            ]
-        )
+        print(refs)
 
         for g in nx.connected_components(G):
-            u = min(
-                scores.iloc[list(g)].Score
-            )  # approx pot energy of state by minimum of the state (because exp weighting)
-            min_conf = scores[scores.Score == u].index[0]
-            # Z = len(g)
-            Z = sum(
-                [np.exp(-scores.iloc[conf].Score / TorsionPosePicker.kbT) for conf in g]
-            )
-            # delta_G = u - TorsionPosePicker.kbT * np.log(
-            #     Z / ref_Z
-            # )  # approx FE difference to ref (which has u=0 by definition)
-            delta_G = -TorsionPosePicker.kbT * np.log(Z / ref_Z)
+            min_conf = scores.iloc[list(g)].nsmallest(1, "Score").index[0]
+            dG_cluster = scores.iloc[min_conf].Score
+            dGAboveMin_cluster = scores.iloc[min_conf].diffToBest
+
             g_dict = {
                 "ID": min_conf,
-                "U": u,
                 "Nstates": int(len(g)),
-                "delta_G": delta_G,
-                "mol": confs[min_conf],
-                "states": ",".join([str(x) for x in g]),
+                "dG": dG_cluster,
+                "dGdiff": dGAboveMin_cluster,
+                "mol": mols[min_conf],
             }
+            new_df = pd.DataFrame([g_dict])
             states = pd.concat(
-                [states, pd.DataFrame([g_dict])], axis=0, ignore_index=True
+                [states.astype(new_df.dtypes), new_df], axis=0, ignore_index=True
             )
 
-        states = states.sort_values(by="delta_G")
-        return states
+            for gg in g:
+
+                gg_dict = {
+                    "ID": gg,
+                    "dG": scores.iloc[gg].Score,
+                    "dGdiff": scores.iloc[gg].diffToBest,
+                    "clusterID": min_conf,
+                    "cluster_dG": dG_cluster,
+                    "cluster_dGdiff": dGAboveMin_cluster,
+                }
+                rms_dict = {
+                    f"rmsd_{i+1}": self._rmsd(mols[gg], ref)
+                    for i, ref in enumerate(refs)
+                }
+                new_df = pd.DataFrame([gg_dict | rms_dict])
+                mol_data = pd.concat(
+                    [mol_data.astype(new_df.dtypes), new_df], axis=0, ignore_index=True
+                )
+
+        clusterRank = mol_data.groupby("clusterID").dG.min().rank().astype("int")
+        mol_data["clusterRank"] = mol_data.clusterID.apply(lambda x: clusterRank[x])
+        for i in range(len(refs)):
+            mol_data[f"rankRmsd_{i+1}"] = mol_data[f"rmsd_{i+1}"].rank().astype("int")
+
+        states = states.sort_values(by="dG")
+        mol_data = mol_data.sort_values(by="ID").reset_index(drop=True)
+        return states, mol_data
 
     @staticmethod
     def _write_models(df_confs_scored: pd.DataFrame) -> None:
@@ -175,91 +174,24 @@ class TorsionPosePicker(PosePicker):
 
         for i, row in df_confs_scored.reset_index().iterrows():
             mol = row.mol
-            mol.SetProp("U", str(row.U))
-            mol.SetProp("delta_G", str(row.delta_G))
+            mol.SetProp("dG", str(row.dG))
             with Chem.SDWriter(f"model_{i+1}.sdf") as writer:
                 writer.write(row.mol)
 
     @staticmethod
-    def _write_data(df_confs_scored: pd.DataFrame) -> None:
-        """Write dataframe without ROMols
-
-        Args:
-            df_confs_scored (pd.DataFrame): Dataframe to store as csv
-        """
-        df_scores = df_confs_scored.drop(columns="mol")
-        df_scores.to_csv("cluster_info.csv", float_format="%.5f", index=False)
-
-    def _getTorsionInfo(self, mol: Mol) -> Tuple[np.array, np.array]:
-        """Helper function to extract torsion indices for each conformer and get dihedral angles.
-
-        Args:
-            mol (Mol): conformer
-
-        Returns:
-            Tuple[np.array, np.array]: Indices (i,j,k,l) of each torsion, and the associated signed
-            angles in the interval [-180,180] degrees.
-        """
-
-        text = self._getExpTorsionText(mol)
-
-        lines = text.split("\n")
-        torsion_indices = np.array([])
-
-        for line in lines:
-
-            # get indices
-            re_match = re.findall(r"\]\:(.*?)\,", line)
-            if len(re_match):
-                indices = set([int(m) for m in re_match[0].split()])
-                torsion_indices = np.append(torsion_indices, indices)
-
-            conf = mol.GetConformer(0)
-            angles = np.array(
-                [GetDihedralDeg(conf, *indices) for indices in torsion_indices]
-            )
-
-        return torsion_indices, angles
-
-    def _getExpTorsionText(self, mol: Mol) -> str:
-        """Get RDKit output on experimental torsions for a given molecule from the logger
-
-        Args:
-            mol (Mol): molecule
-
-        Returns:
-            str: RDKit output with torsion information captured as a string
-        """
-
-        logger_sio = StringIO()
-        handler = logging.StreamHandler(logger_sio)
-        handler.setLevel(logging.INFO)
-
-        self._logger.addHandler(handler)
-        self._logger.setLevel(logging.INFO)
-
-        GetExperimentalTorsions(mol, printExpTorsionAngles=True)
-        text = logger_sio.getvalue()
-        return text
+    def _flattenAndUniquifyTorsions(lists: list):
+        flatlists = [s for sublist in lists for s in sublist[0]]
+        uniqueLists = (
+            pd.DataFrame(flatlists).drop_duplicates(subset=[1, 2]).values.tolist()
+        )
+        return uniqueLists
 
     @staticmethod
-    def _calcDangle(
-        molinfo: Tuple[np.array, np.array], molinfo_ref: Tuple[np.array, np.array]
-    ) -> np.array:
-        """Calculate differences in dihedral angles between two conformers
+    def _getAngles(mol: Mol, torsions: List[List[int]]):
+        conf = mol.GetConformer(0)
+        angles = np.array([GetDihedralDeg(conf, *indices) for indices in torsions])
+        return angles
 
-        Args:
-            molinfo (Tuple[np.array, np.array]): torsion indices and dihedral angles
-            molinfo_ref (Tuple[np.array, np.array]): torsion indices and dihedral angles of reference mol
-
-        Returns:
-            np.array: Signed angle difference in degrees, [-180,180]
-        """
-
-        indices, angles = molinfo
-        indices_ref, angles_ref = molinfo_ref
-
-        index_mapping = [list(indices_ref).index(torsion) for torsion in indices]
-        dangle = ((angles[index_mapping] - angles_ref) + 180) % 360 - 180
-
-        return dangle
+    @staticmethod
+    def _getAngleDiff(angles1: np.array, angles2: np.array):
+        return ((angles2 - angles1) + 180) % 360 - 180

@@ -14,8 +14,8 @@ class ConformerGenerator:
     def __init__(
         self,
         receptor_file: str,
-        query_molecule: str,
-        reference_substructure: str,
+        query_molecule: Mol,
+        reference_substructure: Mol,
         **kwargs
     ) -> None:
         self._receptor_file = receptor_file

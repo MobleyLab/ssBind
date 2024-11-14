@@ -84,7 +84,7 @@ def test_rdkit_generator(receptor_file: str, reference: Mol, ligand: Mol) -> Non
         nprocs=2,
         numconf=20,
     )
-    generate_and_test(generator, 20)
+    generate_and_test(generator, 24)
     cleanup()
 
 

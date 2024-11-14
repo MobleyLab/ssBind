@@ -3,6 +3,8 @@ import argparse
 import multiprocessing as mp
 import os
 
+from rdkit import Chem
+
 from ssBind import SSBIND
 from ssBind.generator import *
 from ssBind.io import MolFromInput
@@ -25,6 +27,12 @@ def ParserOptions():
         dest="receptor",
         help="PDB file for receptor protein",
         required=True,
+    )
+    parser.add_argument(
+        "--ref_ligands",
+        dest="ref_ligands",
+        help="Reference ligands to compare results to (optional)",
+        default=None,
     )
     parser.add_argument(
         "--FF",
@@ -139,6 +147,18 @@ def main(args, nprocs):
     reference_substructure = MolFromInput(args.reference)
     query_molecule = MolFromInput(args.ligand)
 
+    if args.ref_ligands is not None:
+        if not os.path.isfile(args.ref_ligands):
+            raise Exception(f"File {args.ref_ligands} not found!")
+
+        reflig_extension = os.path.splitext(args.ref_ligands)[1].lower()
+        if reflig_extension != ".sdf":
+            raise Exception("Reference ligand(s) have to be provided in an SDF file")
+
+        ref_ligands = [mol for mol in Chem.SDMolSupplier(args.ref_ligands)]
+    else:
+        ref_ligands = []
+
     receptor_extension = os.path.splitext(args.receptor)[1].lower()
     if args.generator == "rdock" and receptor_extension != ".mol2":
         print(
@@ -147,11 +167,12 @@ def main(args, nprocs):
         )
 
     kwargs = {
+        **vars(args),
         "reference_substructure": reference_substructure,
         "query_molecule": query_molecule,
         "receptor_file": args.receptor,
+        "ref_ligands": ref_ligands,
         "nprocs": nprocs,
-        **vars(args),
     }
 
     ssbind = SSBIND(**kwargs)

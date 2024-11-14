@@ -99,7 +99,9 @@ def test_PCA_posepicker(
     cleanup(files)
 
 
-def test_torsion_posepicker(conformers_file: str, scores_file: str) -> None:
+def test_torsion_posepicker(
+    conformers_file: str, scores_file: str, ligand: Mol
+) -> None:
     """Test clustering of conformers and selecting model posees
 
     Args:
@@ -107,14 +109,13 @@ def test_torsion_posepicker(conformers_file: str, scores_file: str) -> None:
         scores_file (str): Path to Scores.csv
     """
 
-    files = [
-        "model_1.sdf",
-        "model_2.sdf",
+    files = [f"model_{i+1}.sdf" for i in range(4)] + [
         "cluster_info.csv",
+        "conf_info.csv",
     ]
 
     cleanup(files)
-    picker = TorsionPosePicker(dG_threshold=1.0)
+    picker = TorsionPosePicker(dG_threshold=0.6, ref_ligands=[ligand])
     picker.pick_poses(conformers_file, scores_file)
     for f in files:
         assert os.path.isfile(f)
