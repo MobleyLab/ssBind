@@ -27,7 +27,10 @@ def test_e2e(receptor_file, reference_file, ligand_file, ligand) -> None:
         "Scores.csv",
         "cluster_info.csv",
         "conf_info.csv",
-    ] + [f"model_{i+1}.sdf" for i in range(5)]
+        "PC1-PC2.svg",
+        "PC1-PC3.svg",
+        "PC2-PC3.svg",
+    ] + [f"model_{i+1}.sdf" for i in range(6)]
 
     root_dir = Path(__file__).parents[1]
     script = os.path.join(root_dir, "run_ssBind.py")
@@ -38,14 +41,10 @@ def test_e2e(receptor_file, reference_file, ligand_file, ligand) -> None:
     #     f"python {script} --reference {reference_file} --ligand {ligand_file} --receptor {receptor_file} --generator rdkit "
     #     "--minimize openmm --FF gaff --proteinFF amber14/protein.ff14SB.xml --clustering Torsion",
     # )
-    # success = os.system(
-    #     f"python {script} --reference {reference_file} --ligand {ligand_file} --receptor {receptor_file} --generator rdkit "
-    #     f"--minimize smina --clustering Torsion --numconf 250 --ref_ligand ligand.sdf",
-    # )
     success = os.system(
-        f"python {script} --reference {reference_file} --ligand {ligand_file} --receptor r.mol2 --generator rdock "
-        f"--clustering Torsion --numconf 1000",
+        f"python {script} --reference {reference_file} --ligand {ligand_file} --receptor {receptor_file} --generator rdkit "
+        f"--minimize smina --clustering PCA --numconf 250 --ref_ligand ligand.sdf",
     )
 
     assert success == 0
-    # cleanup(files_to_remove)
+    cleanup(files_to_remove)

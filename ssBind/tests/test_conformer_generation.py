@@ -1,3 +1,5 @@
+import shutil
+
 from rdkit import Chem
 from rdkit.Chem.rdchem import Mol
 
@@ -29,6 +31,7 @@ def cleanup_rdock() -> None:
     ]:
         try:
             os.remove(f)
+            shutil.rmtree("temp_rdock")
         except OSError:
             pass
 
@@ -119,7 +122,7 @@ def test_rdock_generator(receptor_file_mol2: str, reference: Mol, ligand: Mol) -
         ligand (Mol): ligand.mol2 ligand structure
     """
 
-    cleanup()
+    cleanup_rdock()
     generator = RdockConformerGenerator(
         ligand,
         reference,

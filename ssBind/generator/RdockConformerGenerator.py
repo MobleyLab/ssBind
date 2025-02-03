@@ -241,7 +241,9 @@ END_SECTION
 
         conformer_file = "conformers.sdf"
         files = sorted([f for f in os.listdir(dockdir) if f.endswith(".sd")])
-        numeric_list = sorted([int(re.findall(r"\d+", s)[0]) for s in files])
+        print(files)
+        numeric_list = [re.findall(r"\d+", s) for s in files]
+        numeric_list = sorted([int(s[0]) for s in numeric_list if len(s) > 0])
         mols = []
 
         for num in numeric_list:
