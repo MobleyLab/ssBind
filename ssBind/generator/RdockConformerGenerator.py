@@ -10,6 +10,9 @@ from contextlib import closing
 
 import pandas as pd
 from rdkit import Chem, RDLogger
+from rdkit.Chem.PandasTools import LoadSDF
+from rdkit.Chem.rdchem import Mol
+from rdkit.Geometry import Point3D
 
 from ssBind.generator import ConformerGenerator
 
@@ -59,7 +62,7 @@ class RdockConformerGenerator(ConformerGenerator):
             )
 
         self._combine_files(f"{rdock_random}")
-        shutil.rmtree(f"{rdock_random}")
+        # shutil.rmtree(f"{rdock_random}")
 
     def _get_tethered(
         self, out
@@ -106,8 +109,8 @@ class RdockConformerGenerator(ConformerGenerator):
         GRIDSTEP: float = 0.5,
         SCORING_FUNCTION: str = "RbtCavityGridSF",
         WEIGHT: float = 1.0,
-        MAX_TRANS: float = 0.0,
-        MAX_ROT: float = 0.0,
+        MAX_TRANS: float = 1.0,
+        MAX_ROT: float = 30.0,
     ):
         """
         rbcavity – Cavity mapping and preparation of docking site
@@ -213,6 +216,8 @@ END_SECTION
             "dock.prm",
             "-n",
             str(nruns),
+            "-s",
+            str(i),
         ]
 
         # Execute the command
@@ -232,43 +237,57 @@ END_SECTION
             )
             raise SystemExit(error_msg)
 
-        scores = []
-        with open(f"{output}/{i}.sd", "r") as file:
-            file_content = file.read()
-            scores = re.findall(r">\s*<SCORE>\s*([-\d.]+)", file_content)
+    def _combine_files(self, dockdir: str):
 
-        with open(f"{output}/{i}.csv", "w", newline="") as csvfile:
-            csvwriter = csv.writer(csvfile)
-            for score in scores:
-                csvwriter.writerow([score])
-        return
+        conformer_file = "conformers.sdf"
+        files = sorted([f for f in os.listdir(dockdir) if f.endswith(".sd")])
+        numeric_list = sorted([int(re.findall(r"\d+", s)[0]) for s in files])
+        mols = []
 
-    @staticmethod
-    def _combine_files(dockdir):
-        # Directory containing the csv files
-        files = sorted([f for f in os.listdir(dockdir) if f.endswith(".csv")])
-
-        numeric_list = [int(re.findall(r"\d+", s)[0]) for s in files]
-
-        # Create an SDF writer
-        sdf_writer = Chem.SDWriter("conformers.sdf")
-        combined_df = pd.DataFrame(columns=["Score"])
-
-        # Process each sd file
         for num in numeric_list:
             sd_path = os.path.join(dockdir, f"{num}.sd")
-            mols = Chem.SDMolSupplier(sd_path, sanitize=False)
-            if mols is not None:
-                for i, mol in enumerate(mols):
-                    mol.UpdatePropertyCache(strict=False)
-                    sdf_writer.write(mol)
-            df = pd.read_csv(
-                os.path.join(dockdir, f"{num}.csv"), header=None, names=["Score"]
-            )
-            combined_df = pd.concat([combined_df, df], ignore_index=True)
+            suppl = Chem.SDMolSupplier(sd_path, sanitize=False)
+            mols = mols + [
+                self._updateCoords(mol, self._query_molecule)
+                for mol in suppl
+                if mol is not None
+            ]
 
-        combined_df.reset_index(inplace=True)
-        combined_df.rename(columns={"index": "Index"}, inplace=True)
-        combined_df.to_csv("Scores.csv", index=False)
+        mols_sorted = sorted(mols, key=lambda mol: float(mol.GetProp("SCORE")))
 
-        sdf_writer.close()
+        with Chem.SDWriter(conformer_file) as writer:
+            for mol in mols_sorted:
+                writer.write(mol)
+
+        df = LoadSDF(conformer_file, sanitize=True)[["SCORE"]]
+        df = df.rename(columns={"SCORE": "Score"})
+        df.to_csv("Scores.csv", index_label="Index")
+
+    @staticmethod
+    def _updateCoords(mol: Mol, ref: Mol) -> Mol:
+        """Fix sanitization issues by copying coords from new molecule to object
+        of input ligand (which should work). This assumes that atom order is preserved
+        (seems to be the case)
+
+        Args:
+            mol (Mol): Broken mol with coords to keep
+            ref (Mol): Query molecule
+
+        Returns:
+            Mol: Updated molecule which should sanitize
+        """
+
+        outmol = Chem.Mol(ref)
+        outmol = Chem.RemoveAllHs(outmol)
+
+        props = mol.GetPropsAsDict()
+        for propname, prop in props.items():
+            outmol.SetProp(propname, str(prop))
+
+        pos = mol.GetConformer().GetPositions()
+        conf = outmol.GetConformer()
+        for i in range(outmol.GetNumAtoms()):
+            x, y, z = pos[i]
+            conf.SetAtomPosition(i, Point3D(x, y, z))
+
+        return outmol

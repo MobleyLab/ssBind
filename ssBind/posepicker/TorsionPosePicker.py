@@ -24,7 +24,7 @@ class TorsionPosePicker(PosePicker):
         self._cutoff_angle = kwargs.get("cutoff_angle", 90)
         self._rmsd_symmetry_threshold = kwargs.get("rmsd_symmetry_threshold", 0.3)
         self._rmsd_threshold = kwargs.get("rmsd_threshold", 2.0)
-        self._dG_threshold = kwargs.get("dG_threshold", 0.6)
+        self._dG_threshold = kwargs.get("dG_threshold", 5)
         self._dG_clustering_threshold = kwargs.get("dG_clustering_threshold", 0)
         self._dG_diff_clustering_threshold = kwargs.get(
             "dG_diff_clustering_threshold", np.inf
@@ -116,7 +116,6 @@ class TorsionPosePicker(PosePicker):
             columns=["ID", "dG", "dGdiff", "clusterID", "cluster_dG", "cluster_dGdiff"]
             + [f"rmsd_{i+1}" for i in range(len(refs))]
         )
-        print(refs)
 
         for g in nx.connected_components(G):
             min_conf = scores.iloc[list(g)].nsmallest(1, "Score").index[0]

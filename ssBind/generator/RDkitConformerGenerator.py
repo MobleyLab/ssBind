@@ -77,8 +77,10 @@ class RDkitConformerGenerator(ConformerGenerator):
         Args:
             seed (int): Random seed for constrained embedding.
         """
-        ligand = Chem.AddHs(self._query_molecule)
-        ligEmbed = self._embed(ligand, seed + 1, torsionPrefs)
+        ligand = Chem.AddHs(self._query_molecule, addCoords=True)
+        ligEmbed = self._ConstrainedEmbed(
+            ligand, randomseed=seed + 1, torsionPrefs=torsionPrefs
+        )
         outmol = Chem.RemoveHs(ligEmbed)
 
         self._filtering(outmol)
@@ -111,51 +113,78 @@ class RDkitConformerGenerator(ConformerGenerator):
         self._alignToRef(l_embed)
         return l_embed
 
-    def _embed(
+    def _ConstrainedEmbed(
         self,
-        ligand: Mol,
-        seed: int = -1,
-        torsionPrefs: bool = True,
+        mol,
+        torsionPrefs=True,
+        useTethers=True,
+        coreConfId=-1,
+        randomseed=2342,
         getForceField=UFFGetMoleculeForceField,
         **kwargs
     ):
 
         core = self._reference_substructure
-        match = list(zip(*self._mappingLigToRef))[0]
+        mappingLigToRef = self._mappingLigToRef
 
+        outmol = Chem.Mol(mol)
+        if mappingLigToRef is None:
+            match = outmol.GetSubstructMatch(core)
+        else:
+            sorted_mapping = sorted(mappingLigToRef, key=lambda x: x[1])
+            match = list(zip(*sorted_mapping))[0]
+        if not match:
+            raise ValueError("molecule doesn't match the core")
         coordMap = {}
-        ligConf = ligand.GetConformer(-1)
-        for _, ligIdx in self._mappingRefToLig:
-            ligPtI = ligConf.GetAtomPosition(ligIdx)
-            coordMap[ligIdx] = ligPtI
+        coreConf = core.GetConformer(coreConfId)
+        for i, idxI in enumerate(match):
+            corePtI = coreConf.GetAtomPosition(i)
+            coordMap[idxI] = corePtI
 
         ci = EmbedMolecule(
-            ligand,
+            outmol,
             coordMap=coordMap,
-            randomSeed=seed,
+            randomSeed=randomseed,
             useExpTorsionAnglePrefs=torsionPrefs,
             **kwargs
         )
         if ci < 0:
             raise ValueError("Could not embed molecule.")
 
-        algMap = self._mappingLigToRef
+        algMap = [(j, i) for i, j in enumerate(match)]
 
-        # rotate the embedded conformation onto the core:
-        rms = AlignMol(ligand, core, atomMap=algMap)
-        ff = getForceField(ligand, confId=0)
-        conf = core.GetConformer()
-        for i in range(core.GetNumAtoms()):
-            p = conf.GetAtomPosition(i)
-            pIdx = ff.AddExtraPoint(p.x, p.y, p.z, fixed=True) - 1
-            ff.AddDistanceConstraint(pIdx, match[i], 0, 0, 100.0)
-        ff.Initialize()
-        n = 4
-        more = ff.Minimize(energyTol=1e-4, forceTol=1e-3)
-        while more and n:
+        if not useTethers:
+            # clean up the conformation
+            ff = getForceField(outmol, confId=0)
+            for i, idxI in enumerate(match):
+                for j in range(i + 1, len(match)):
+                    idxJ = match[j]
+                    d = coordMap[idxI].Distance(coordMap[idxJ])
+                    ff.AddDistanceConstraint(idxI, idxJ, d, d, 100.0)
+            ff.Initialize()
+            n = 4
+            more = ff.Minimize()
+            while more and n:
+                more = ff.Minimize()
+                n -= 1
+            # rotate the embedded conformation onto the core:
+            rms = AlignMol(outmol, core, atomMap=algMap)
+        else:
+            # rotate the embedded conformation onto the core:
+            rms = AlignMol(outmol, core, atomMap=algMap)
+            ff = getForceField(outmol, confId=0)
+            conf = core.GetConformer()
+            for i in range(core.GetNumAtoms()):
+                p = conf.GetAtomPosition(i)
+                pIdx = ff.AddExtraPoint(p.x, p.y, p.z, fixed=True) - 1
+                ff.AddDistanceConstraint(pIdx, match[i], 0, 0, 100.0)
+            ff.Initialize()
+            n = 4
             more = ff.Minimize(energyTol=1e-4, forceTol=1e-3)
-            n -= 1
-        # realign
-        rms = AlignMol(ligand, core, atomMap=algMap)
-        ligand.SetProp("EmbedRMS", str(rms))
-        return ligand
+            while more and n:
+                more = ff.Minimize(energyTol=1e-4, forceTol=1e-3)
+                n -= 1
+            # realign
+            rms = AlignMol(outmol, core, atomMap=algMap)
+        outmol.SetProp("EmbedRMS", str(rms))
+        return outmol
