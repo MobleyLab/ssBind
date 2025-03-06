@@ -1,14 +1,11 @@
-import csv
 import math
 import multiprocessing as mp
 import os
 import re
-import shutil
 import subprocess
 import uuid
 from contextlib import closing
 
-import pandas as pd
 from rdkit import Chem, RDLogger
 from rdkit.Chem.PandasTools import LoadSDF
 from rdkit.Chem.rdchem import Mol
@@ -240,10 +237,8 @@ END_SECTION
     def _combine_files(self, dockdir: str):
 
         conformer_file = "conformers.sdf"
-        files = sorted([f for f in os.listdir(dockdir) if f.endswith(".sd")])
-        print(files)
-        numeric_list = [re.findall(r"\d+", s) for s in files]
-        numeric_list = sorted([int(s[0]) for s in numeric_list if len(s) > 0])
+        files = sorted([f[:-3] for f in os.listdir(dockdir) if f.endswith(".sd")])
+        numeric_list = sorted([int(f) for f in files if f.isdigit()])
         mols = []
 
         for num in numeric_list:

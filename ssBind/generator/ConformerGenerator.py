@@ -49,19 +49,20 @@ class ConformerGenerator:
         matches_ref = ref.GetSubstructMatches(submol, uniquify=False)
         matches_lig = ligand.GetSubstructMatches(submol, uniquify=False)
 
-        for match_ref in matches_ref:
-            for match_lig in matches_lig:
-                dist = [
-                    (
-                        ref.GetConformer().GetAtomPosition(i0)
-                        - ligand.GetConformer().GetAtomPosition(ii)
-                    ).Length()
-                    for i0, ii in zip(match_ref, match_lig)
-                ]
+        for tol in [distTol, distTol + 1.0]:
+            for match_ref in matches_ref:
+                for match_lig in matches_lig:
+                    dist = [
+                        (
+                            ref.GetConformer().GetAtomPosition(i0)
+                            - ligand.GetConformer().GetAtomPosition(ii)
+                        ).Length()
+                        for i0, ii in zip(match_ref, match_lig)
+                    ]
 
-                if all([d < distTol for d in dist]):
-                    keepMatches = [match_ref, match_lig]
-                    return list(zip(*keepMatches))
+                    if all([d < tol for d in dist]):
+                        keepMatches = [match_ref, match_lig]
+                        return list(zip(*keepMatches))
 
         raise Exception("ERROR: No MCS found!")
 

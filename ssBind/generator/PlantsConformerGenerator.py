@@ -358,6 +358,7 @@ ligand_file ligand.mol2 fixed_scaffold_{fixedAtom}
 
             # Create an SDF writer
         sdf_writer = Chem.SDWriter("conformers.sdf")
+        sdf_writer.SetKekulize(False)
 
         # Process each Mol2 file
         for f in files:

@@ -28,7 +28,7 @@ class RDkitConformerGenerator(ConformerGenerator):
     def generate_conformers(self) -> None:
         """Generate conformers using random embeddings via RDKit."""
 
-        maxRepeats = 10
+        maxRepeats = 100
         torsionPrefs = True
 
         for repeat in range(maxRepeats):
@@ -36,7 +36,10 @@ class RDkitConformerGenerator(ConformerGenerator):
             self._generate_n_conformers(
                 self._numconf, repeat * self._numconf, torsionPrefs
             )
-            numconf_generated = len(Chem.SDMolSupplier("conformers.sdf"))
+            try:
+                numconf_generated = len(Chem.SDMolSupplier("conformers.sdf"))
+            except OSError:
+                numconf_generated = 0
 
             # check if we have the number of conformers desired by the user
             if numconf_generated >= self._numconf:

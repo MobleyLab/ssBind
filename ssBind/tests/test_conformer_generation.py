@@ -150,3 +150,29 @@ def test_plants_generator(receptor_file: str, reference: Mol, ligand: Mol) -> No
     )
     generate_and_test(generator, 10)
     cleanup_plants()
+
+
+def test_autodock_generator(
+    receptor_file: str, reference: Mol, ligand: Mol, ligand_file: str
+) -> None:
+    """Test RDKitConformerGenerator
+
+    Args:
+        receptor_file (str): receptor.pdb protein structure
+        reference (Mol): reference.mol2 restrained ligand substructure
+        ligand (Mol): ligand.mol2 ligand structure
+    """
+
+    cleanup()
+    generator = AutodockGenerator(
+        receptor_file,
+        ligand,
+        reference,
+        ligand=ligand_file,
+        nprocs=2,
+        numconf=20,
+        working_dir="test_autodock",
+        autodock_hydrated=True,
+    )
+    generate_and_test(generator, 20)
+    cleanup()

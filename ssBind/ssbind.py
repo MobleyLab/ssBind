@@ -56,6 +56,8 @@ class SSBIND:
             )
         elif generator_type == "plants":
             self._generator = PlantsConformerGenerator(**self._kwargs)
+        elif generator_type == "autodock":
+            self._generator = AutodockGenerator(**self._kwargs)
         else:
             raise Exception(f"Invalid conformer generator: {generator_type}")
 

@@ -1,4 +1,5 @@
 from .AngleConformerGenerator import AngleConformerGenerator
+from .AutodockGenerator import AutodockGenerator
 from .ConformerGenerator import ConformerGenerator
 from .PlantsConformerGenerator import PlantsConformerGenerator
 from .RDkitConformerGenerator import RDkitConformerGenerator

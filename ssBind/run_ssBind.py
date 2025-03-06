@@ -4,6 +4,7 @@ import multiprocessing as mp
 import os
 
 from rdkit import Chem
+from rdkit.Chem import MolFromMol2File
 
 from ssBind import SSBIND
 from ssBind.generator import *
@@ -73,7 +74,7 @@ def ParserOptions():
         "--generator",
         dest="generator",
         help="Choose a method for the conformer generation.",
-        choices=["angle", "rdkit", "plants", "rdock"],
+        choices=["angle", "rdkit", "plants", "rdock", "autodock"],
     )
     parser.add_argument(
         "--numconf", dest="numconf", type=int, help="Number of confermers", default=1000
@@ -144,8 +145,9 @@ def ParserOptions():
 
 def main(args, nprocs):
 
-    reference_substructure = MolFromInput(args.reference)
-    query_molecule = MolFromInput(args.ligand)
+    reference_substructure = MolFromMol2File(args.reference, cleanupSubstructures=False)
+    reference_substructure = Chem.RemoveAllHs(reference_substructure)
+    query_molecule = MolFromMol2File(args.ligand, cleanupSubstructures=False)
 
     if args.ref_ligands is not None:
         if not os.path.isfile(args.ref_ligands):
