@@ -11,5 +11,4 @@ pytest.ini
 .DS_Store
 pytest-hpc3
 dist/
-**/smina.static
 LOCAL/
