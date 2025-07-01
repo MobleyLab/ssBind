@@ -82,7 +82,7 @@ def ParserOptions():
         dest="posepicker",
         help="Conformer clustering algorithm",
         choices=["Off", "Default", "PCA", "Torsion"],
-        default="PCA",
+        default="Default",
     )
     parser.add_argument(
         "--flexDist",
