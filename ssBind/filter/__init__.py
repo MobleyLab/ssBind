@@ -1,1 +1,0 @@
-from .ConformerFilter import ConformerFilter

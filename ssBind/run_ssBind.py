@@ -8,7 +8,6 @@ from rdkit.Chem import MolFromMol2File
 
 from ssBind import SSBIND
 from ssBind.generator import *
-from ssBind.io import MolFromInput
 
 # Substructure-based alternative BINDing modes generator for protein-ligand systems
 
@@ -29,20 +28,7 @@ def ParserOptions():
         help="PDB file for receptor protein",
         required=True,
     )
-    parser.add_argument(
-        "--ref_ligands",
-        dest="ref_ligands",
-        help="Reference ligands to compare results to (optional)",
-        default=None,
-    )
-    parser.add_argument(
-        "--FF",
-        dest="FF",
-        default="gaff",
-        help="Generalized Force Fields GAFF, CGenFF, OpenFF",
-        choices=["gaff", "gaff2", "openff", "cgenff"],
-    )
-    parser.add_argument("--proteinFF", dest="proteinFF", default="amber99sb-ildn")
+    # TODO remove
     parser.add_argument(
         "--degree",
         dest="degree",
@@ -82,28 +68,20 @@ def ParserOptions():
     parser.add_argument(
         "--minimize",
         dest="minimize",
-        help="Perform minimization",
-        choices=["gromacs", "smina", "openmm"],
+        help="Perform minimization (recommended: smina with rdkit). local means minimization of the reference only.",
+        choices=["gromacs", "smina", "openmm", "local"],
     )
     parser.add_argument(
-        "--openmm-score",
-        dest="openmm_score",
-        help="Calculate total or interaction energy upon minimization with OpenMM",
-        choices=["interaction", "total"],
-        default="interaction",
-    )
-    parser.add_argument(
-        "--openmm-flex",
-        dest="openmm_flex",
-        help="Treat protein as flexible upon OpenMM minimization",
-        type=bool,
-        default=False,
+        "--hydrate",
+        dest="autodock_hydrated",
+        help="Hydrated docking with Autodock",
+        action="store_true",
     )
     parser.add_argument(
         "--clustering",
         dest="posepicker",
         help="Conformer clustering algorithm",
-        choices=["PCA", "Torsion"],
+        choices=["Off", "Default", "PCA", "Torsion"],
         default="PCA",
     )
     parser.add_argument(
@@ -118,26 +96,10 @@ def ParserOptions():
         type=str,
         help="Residues having side-chain flexibility taken into account. Take a list of residues for flexibility",
     )
-    parser.add_argument(
-        "--bin",
-        dest="bin",
-        type=float,
-        help="Numeric vector giving bin width in both vertical and horizontal directions in PCA analysis",
-        default=0.25,
-    )
-    parser.add_argument(
-        "--distThresh",
-        dest="distThresh",
-        type=float,
-        help="elements within this range of each other are considered to be neighbors during clustering",
-        default=0.5,
-    )
-    parser.add_argument(
-        "--numbin",
-        dest="numbin",
-        type=int,
-        help="Number of bins to be extract for clustering conformations",
-        default=10,
+    parser.add_argument(  # for plants
+        "--no_prepare_ligand",
+        dest="no_prepare_ligand",
+        action="store_true",
     )
     args = parser.parse_args()
     return args
@@ -148,18 +110,6 @@ def main(args, nprocs):
     reference_substructure = MolFromMol2File(args.reference, cleanupSubstructures=False)
     reference_substructure = Chem.RemoveAllHs(reference_substructure)
     query_molecule = MolFromMol2File(args.ligand, cleanupSubstructures=False)
-
-    if args.ref_ligands is not None:
-        if not os.path.isfile(args.ref_ligands):
-            raise Exception(f"File {args.ref_ligands} not found!")
-
-        reflig_extension = os.path.splitext(args.ref_ligands)[1].lower()
-        if reflig_extension != ".sdf":
-            raise Exception("Reference ligand(s) have to be provided in an SDF file")
-
-        ref_ligands = [mol for mol in Chem.SDMolSupplier(args.ref_ligands)]
-    else:
-        ref_ligands = []
 
     receptor_extension = os.path.splitext(args.receptor)[1].lower()
     if args.generator == "rdock" and receptor_extension != ".mol2":
@@ -173,7 +123,6 @@ def main(args, nprocs):
         "reference_substructure": reference_substructure,
         "query_molecule": query_molecule,
         "receptor_file": args.receptor,
-        "ref_ligands": ref_ligands,
         "nprocs": nprocs,
     }
 
@@ -199,9 +148,6 @@ def main(args, nprocs):
 if __name__ == "__main__":
 
     args = ParserOptions()
-
     nprocs = args.cpu if args.cpu is not None else mp.cpu_count()
-
     print(f"\nNumber of CPU in use for conformer generation: {nprocs}")
-
     main(args, nprocs)

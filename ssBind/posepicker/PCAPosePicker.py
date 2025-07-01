@@ -2,15 +2,12 @@ import multiprocessing as mp
 from contextlib import closing
 
 import matplotlib.pyplot as plt
-import MDAnalysis as mda
 import pandas as pd
 import seaborn as sns
 from matplotlib.colors import LinearSegmentedColormap
 from MDAnalysis.analysis import pca
 from rdkit import Chem
 from rdkit.ML.Cluster import Butina
-from spyrmsd.molecule import Molecule
-from spyrmsd.rmsd import rmsdwrapper
 
 from ssBind.posepicker.PosePicker import PosePicker
 

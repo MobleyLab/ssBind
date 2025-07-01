@@ -28,6 +28,12 @@ class RDkitConformerGenerator(ConformerGenerator):
     def generate_conformers(self) -> None:
         """Generate conformers using random embeddings via RDKit."""
 
+        if self._minimize_only:
+            # do nothing here, smina will minimize
+            with Chem.SDWriter("conformers.sdf") as writer:
+                writer.write(self._query_molecule)
+            return
+
         maxRepeats = 100
         torsionPrefs = True
 

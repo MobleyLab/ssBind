@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -5,6 +6,7 @@ import uuid
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
+from rdkit import Chem
 from rdkit.Chem.rdchem import Mol
 
 from ssBind.generator.ConformerGenerator import ConformerGenerator
@@ -22,7 +24,7 @@ class AutodockGenerator(ConformerGenerator):
         super().__init__(
             receptor_file, query_molecule, reference_substructure, **kwargs
         )
-        self._ligand_file = kwargs.get("ligand")
+        self._ligand_file = os.path.abspath(kwargs.get("ligand"))
         self._hydrated = kwargs.get("autodock_hydrated", False)
         self._ligand_padding = kwargs.get("autodock_ligand_padding", 5)  # 5A
         self._rmstol = kwargs.get("autodock_rmstol", 0.1)
@@ -49,13 +51,17 @@ class AutodockGenerator(ConformerGenerator):
         self._run_docking(changed_atypes)
         self._export_results()
 
-        shutil.move(os.path.join(self._working_dir, "conformers.sdf"), self._curdir)
+        shutil.copy(os.path.join(self._working_dir, "conformers.sdf"), self._curdir)
         try:
             shutil.rmtree(self._working_dir)
         except:
             pass
 
+        self._write_scores_csv()
+
     def _mk_prepare_receptor(self) -> None:
+        filedir = os.path.dirname(__file__)
+        template_json = os.path.join(filedir, "autodockUtils", "template.json")
         prepare_receptor_cmd = [
             "mk_prepare_receptor.py",
             "-i",
@@ -68,6 +74,9 @@ class AutodockGenerator(ConformerGenerator):
             self._ligand_file,
             "--padding",
             str(self._ligand_padding),
+            "--allow_bad_res",
+            "--add_templates",
+            template_json,
         ]
         subprocess.run(prepare_receptor_cmd, cwd=self._working_dir, check=True)
 
@@ -79,6 +88,7 @@ class AutodockGenerator(ConformerGenerator):
 
         filedir = os.path.dirname(__file__)
         cmd = [
+            "python",
             os.path.join(filedir, "autodockUtils", "mapwater.py"),
             "-r",
             "receptor.pdbqt",
@@ -137,6 +147,7 @@ class AutodockGenerator(ConformerGenerator):
 
         for old_atype, new_atype, position in changed_atypes:
             addbias_cmd = [
+                "python",
                 os.path.join(filedir, "autodockUtils", "addbias.py"),
                 "-i",
                 f"receptor.{old_atype}.map",
@@ -149,6 +160,7 @@ class AutodockGenerator(ConformerGenerator):
             ]
             subprocess.run(addbias_cmd, cwd=self._working_dir, check=True)
             insert_type_cmd = [
+                "python",
                 os.path.join(filedir, "autodockUtils", "insert_type_in_fld.py"),
                 "receptor.maps.fld",
                 "--newtype",
@@ -159,8 +171,11 @@ class AutodockGenerator(ConformerGenerator):
     def _insert_W_to_fld(self) -> None:
 
         cmd = [
+            "python",
             os.path.join(
-                os.path.dirname(__file__), "autodockUtils", "insert_type_in_fld.py"
+                os.path.dirname(__file__),
+                "autodockUtils",
+                "insert_type_in_fld.py",
             ),
             "receptor.maps.fld",
             "--newtype",
@@ -174,10 +189,9 @@ class AutodockGenerator(ConformerGenerator):
         for old_atype, new_atype, _ in changed_atypes:
             t_options_map.setdefault(old_atype, []).append(new_atype)
         t_options = "/".join([f"{','.join(v)}={k}" for k, v in t_options_map.items()])
-        print(t_options)
 
         adgpu_cmd = [
-            "autodock_gpu_128wi",
+            "autodock",
             "-L",
             "ligand_new.pdbqt",
             "-M",
@@ -194,14 +208,25 @@ class AutodockGenerator(ConformerGenerator):
             "256000",
             "--rmstol",
             str(self._rmstol),
-            # "--seed",
-            # "0,1,2",
         ]
         subprocess.run(adgpu_cmd, cwd=self._working_dir, check=True)
 
     def _export_results(self) -> None:
         export_cmd = ["mk_export.py", "ligand_new.dlg", "-s", "conformers.sdf"]
         subprocess.run(export_cmd, cwd=self._working_dir, check=True)
+
+    def _write_scores_csv(self) -> None:
+
+        scores = [
+            json.loads(mol.GetProp("meeko"))["free_energy"]
+            for mol in Chem.SDMolSupplier("conformers.sdf")
+        ]
+
+        with open("Scores.csv", "w") as f:
+            f.write("Index,Score\n")
+
+            for i, score in enumerate(scores):
+                f.write(f"{i},{score}\n")
 
     @staticmethod
     def _base36encode(number, length=2):

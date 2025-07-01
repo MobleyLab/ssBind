@@ -1,1 +1,2 @@
 include ssBind/utils/*
+include ssBind/generator/autodockUtils/*

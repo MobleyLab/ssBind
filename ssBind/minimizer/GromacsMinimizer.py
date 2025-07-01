@@ -41,7 +41,7 @@ class GromacsMinimizer:
         self,
         receptor_file: str,
         proteinFF: str = "amber99sb-ildn",
-        FF: str = "gaff",
+        FF: str = "gaff",  # ["gaff", "gaff2", "openff", "cgenff"]
         **kwargs,
     ) -> None:
         self._receptor_file = receptor_file

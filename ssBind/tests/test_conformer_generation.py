@@ -16,6 +16,16 @@ def cleanup() -> None:
         pass
 
 
+def cleanup_autodock() -> None:
+    """Remove conformers file created during testing"""
+
+    for f in ["conformers.sdf", "Scores.csv"]:
+        try:
+            os.remove(f)
+        except OSError:
+            pass
+
+
 def cleanup_rdock() -> None:
     """Remove all files rdock creates locally during testing"""
 
@@ -144,7 +154,7 @@ def test_plants_generator(receptor_file: str, reference: Mol, ligand: Mol) -> No
         ligand (Mol): ligand.mol2 ligand structure
     """
 
-    cleanup()
+    cleanup_plants()
     generator = PlantsConformerGenerator(
         ligand, reference, receptor_file, nprocs=2, numconf=10
     )
@@ -163,7 +173,7 @@ def test_autodock_generator(
         ligand (Mol): ligand.mol2 ligand structure
     """
 
-    cleanup()
+    cleanup_autodock()
     generator = AutodockGenerator(
         receptor_file,
         ligand,
@@ -175,4 +185,4 @@ def test_autodock_generator(
         autodock_hydrated=True,
     )
     generate_and_test(generator, 20)
-    cleanup()
+    cleanup_autodock()

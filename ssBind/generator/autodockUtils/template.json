@@ -1,0 +1,34 @@
+{
+    "ambiguous": {
+        "NA": [
+            "Na"
+        ],
+        "K": [
+            "K"
+        ],
+        "CU": [
+            "Cu"
+        ],
+        "HG": [
+            "Hg"
+        ]
+    },
+    "residue_templates": {
+        "Na": {
+            "smiles": "[Na]",
+            "link_labels": {}
+        },
+        "K": {
+            "smiles": "[K]",
+            "link_labels": {}
+        },
+        "Cu": {
+            "smiles": "[Cu]",
+            "link_labels": {}
+        },
+        "Hg": {
+            "smiles": "[Hg]",
+            "link_labels": {}
+        }
+    }
+}

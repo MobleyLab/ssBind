@@ -6,7 +6,6 @@ import uuid
 
 import MDAnalysis as mda
 
-from ssBind.filter import ConformerFilter
 from ssBind.generator import *
 from ssBind.minimizer import *
 from ssBind.posepicker import *
@@ -81,8 +80,13 @@ class SSBIND:
 
         minimizer_type = self._kwargs.get("minimize")
 
-        if minimizer_type is None:
-            pass
+        # dirty hack - do something better later
+        if (self._kwargs.get("generator") in ["rdkit", "angle"]) and (
+            minimizer_type == "local"
+        ):
+            self._minimizer = SminaMinimizer(**self._kwargs)
+        elif (minimizer_type is None) or (minimizer_type == "local"):
+            return
         elif minimizer_type == "gromacs":
             self._minimizer = GromacsMinimizer(**self._kwargs)
         elif minimizer_type == "smina":
@@ -113,7 +117,11 @@ class SSBIND:
 
         posepicker_type = self._kwargs.get("posepicker")
 
-        if posepicker_type == "PCA":
+        if posepicker_type == "Off":
+            return
+        elif posepicker_type == "Default":
+            self._posepicker = SimplePosePicker(**self._kwargs)
+        elif posepicker_type == "PCA":
             self._posepicker = PCAPosePicker(**self._kwargs)
         elif posepicker_type == "Torsion":
             self._posepicker = TorsionPosePicker(**self._kwargs)

@@ -14,7 +14,7 @@ from rdkit import Chem
 from rdkit.Chem import rdmolops
 
 from ssBind.generator import ConformerGenerator
-from ssBind.io import MolFromInput, obabel_convert, parse_pdb_line
+from ssBind.io import obabel_convert, parse_pdb_line
 
 
 class PlantsConformerGenerator(ConformerGenerator):
@@ -26,6 +26,7 @@ class PlantsConformerGenerator(ConformerGenerator):
         receptor_file: str,
         flexDist: int = None,
         flexList: str = None,
+        no_prepare_ligand=False,
         **kwargs: Dict,
     ) -> None:
         super().__init__(
@@ -34,7 +35,9 @@ class PlantsConformerGenerator(ConformerGenerator):
 
         self._flexDist = flexDist
         self._flexList = flexList
+        self._no_prepare_ligand = no_prepare_ligand
         self._working_dir = kwargs.get("working_dir", os.path.join(os.getcwd(), "tmp"))
+        self._ligand_file = kwargs.get("ligand", None)
 
     def generate_conformers(self) -> None:
         """
@@ -64,7 +67,16 @@ class PlantsConformerGenerator(ConformerGenerator):
             pool.starmap(
                 self._plants_docking,
                 [
-                    (i, output_dir, 15, 10, xyz, fixedAtom, flex_res)
+                    (
+                        i,
+                        output_dir,
+                        15,
+                        10,
+                        xyz,
+                        fixedAtom,
+                        flex_res,
+                        self._minimize_only,
+                    )
                     for i in range(math.ceil(self._numconf / 10))
                 ],
             )
@@ -97,11 +109,14 @@ class PlantsConformerGenerator(ConformerGenerator):
         ligand = self._query_molecule
         reflig = self._reference_substructure
 
-        pdwriter = Chem.PDBWriter("ligand.pdb", flavor=4)
-        pdwriter.write(ligand)
-        pdwriter.close()
+        if not self._no_prepare_ligand:
+            pdwriter = Chem.PDBWriter("ligand.pdb", flavor=4)
+            pdwriter.write(ligand)
+            pdwriter.close()
 
-        self._SPORES("ligand.pdb", "ligand.mol2", "complete")
+            self._SPORES("ligand.pdb", "ligand.mol2", "complete")
+        else:
+            shutil.copyfile(os.path.abspath(self._ligand_file), "ligand.mol2")
 
         ligcenter = self._molecule_center(reflig)
 
@@ -170,6 +185,7 @@ class PlantsConformerGenerator(ConformerGenerator):
         xyz=None,
         fixedAtom=None,
         flex_res=None,
+        min_only=False,
     ):
 
         template = f"""
@@ -189,6 +205,7 @@ ligand_intra_score lj
 
 #Output Options
 write_multi_mol2 0
+write_rescored_structures 1
 
 #Fixed Scaffold
 ligand_file ligand.mol2 fixed_scaffold_{fixedAtom}
@@ -213,7 +230,8 @@ ligand_file ligand.mol2 fixed_scaffold_{fixedAtom}
             shutil.copy(os.path.join(curdir, "plants_config"), output_dir)
             os.chdir(output_dir)
 
-            os.system(f"""PLANTS --mode screen plants_config > PLANTS.log 2>&1 """)
+            mode = "rescore" if min_only else "screen"
+            os.system(f"""PLANTS --mode {mode} plants_config > PLANTS.log 2>&1 """)
 
             for filename in os.listdir("."):
                 if flex_res == []:
@@ -367,6 +385,12 @@ ligand_file ligand.mol2 fixed_scaffold_{fixedAtom}
                 mol = Chem.MolFromPDBFile(path, sanitize=False)
             else:
                 mol = Chem.MolFromMol2File(path, sanitize=False)
+                if mol is None:
+                    try:
+                        obabel_convert(path, path + ".sdf")
+                    except:
+                        pass
+                    mol = next(Chem.SDMolSupplier(path + ".sdf", sanitize=False))
             if mol is not None:
                 sdf_writer.write(mol)
         sdf_writer.close()

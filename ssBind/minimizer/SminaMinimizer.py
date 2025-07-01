@@ -1,4 +1,3 @@
-import csv
 import multiprocessing as mp
 import os
 import shutil
@@ -7,6 +6,7 @@ import uuid
 from contextlib import closing
 
 from rdkit import Chem, RDLogger
+from rdkit.Chem.PandasTools import LoadSDF
 
 
 class SminaMinimizer:
@@ -78,21 +78,6 @@ class SminaMinimizer:
         with open(log_file_path, "w") as log_file:
             subprocess.run(command, stdout=log_file, stderr=subprocess.STDOUT)
 
-        try:
-            with open(log_file_path, "r") as file:
-                for line in file:
-                    if "Affinity" in line:
-                        affinity = float(line.split()[1])
-                        scores_csv_path = os.path.join(self._working_dir, "Scores.csv")
-                        with open(scores_csv_path, "a", newline="") as csvfile:
-                            csv_writer = csv.writer(csvfile)
-                            csv_writer.writerow([index, affinity])
-                        break
-        except FileNotFoundError as e:
-            print(f"Error: {e}")
-        except Exception as e:
-            print(f"An error occurred: {e}")
-
         # Clean up temporary files
         for file_to_remove in [ligand_file_path, log_file_path]:
             try:
@@ -104,28 +89,27 @@ class SminaMinimizer:
 
         RDLogger.DisableLog("rdApp.*")
 
-        sdf_writer = Chem.SDWriter(output_sdf_path)
-
         files = [f for f in os.listdir(self._working_dir) if f.endswith(".sdf")]
+        mols = []
 
         for i in range(len(files)):
             full_path = os.path.join(self._working_dir, f"{i}_min.sdf")
             suppl = Chem.SDMolSupplier(full_path, sanitize=False)
             for mol in suppl:
-                sdf_writer.write(mol)
+                mols.append(mol)
 
-        sdf_writer.close()
+        mols_sorted = sorted(
+            mols, key=lambda mol: float(mol.GetProp("minimizedAffinity"))
+        )
 
-        with open(
-            os.path.join(self._working_dir, "Scores.csv"), "r"
-        ) as unsorted_csv_file:
-            csv_reader = csv.reader(unsorted_csv_file)
-            sorted_csv_rows = sorted(csv_reader, key=lambda x: int(x[0]))
+        with Chem.SDWriter(output_sdf_path) as writer:
+            for mol in mols_sorted:
+                writer.write(mol)
 
-        with open(sorted_csv_path, "w", newline="") as sorted_csv_file:
-            csv_writer = csv.writer(sorted_csv_file)
-            csv_writer.writerow(["Index", "Score"])
-            csv_writer.writerows(sorted_csv_rows)
+        df = LoadSDF(output_sdf_path, sanitize=True)[["minimizedAffinity"]]
+        df = df.rename(columns={"minimizedAffinity": "Score"})
+        df.to_csv(sorted_csv_path, index_label="Index")
+
         try:
             shutil.rmtree(self._working_dir)
         except:

@@ -1,8 +1,10 @@
+import os
 from abc import abstractmethod
 from copy import deepcopy
 from typing import List, Tuple
 
 import MDAnalysis as mda
+from MDAnalysis.analysis import distances
 from rdkit import Chem
 from rdkit.Chem import AllChem, rdFMCS, rdmolops
 from rdkit.Chem.Draw import rdMolDraw2D
@@ -18,12 +20,13 @@ class ConformerGenerator:
         reference_substructure: Mol,
         **kwargs
     ) -> None:
-        self._receptor_file = receptor_file
+        self._receptor_file = os.path.abspath(receptor_file)
         self._query_molecule = query_molecule
         self._reference_substructure = reference_substructure
         self._nprocs = kwargs.get("nprocs", 1)
-        self._numconf = kwargs.get("numconf", 1)
         distTol = kwargs.get("distTol", 1.0)
+        self._minimize_only = kwargs.get("minimize", None) == "local"
+        self._numconf = kwargs.get("numconf", 1) if not self._minimize_only else 1
 
         # for filtering
         self._cutoff_dist = kwargs.get("cutoff_dist", 1.5)
@@ -128,8 +131,6 @@ class ConformerGenerator:
         atom1 = protein.select_atoms("not name H*")
         atom2 = ligand.select_atoms("not name H*")
 
-        distances = mda.analysis.distances.distance_array(
-            atom1.positions, atom2.positions
-        )
+        dist_array = distances.distance_array(atom1.positions, atom2.positions)
 
-        return distances.min() < cutoff
+        return dist_array.min() < cutoff

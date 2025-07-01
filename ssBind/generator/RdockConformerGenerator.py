@@ -2,6 +2,7 @@ import math
 import multiprocessing as mp
 import os
 import re
+import shutil
 import subprocess
 import uuid
 from contextlib import closing
@@ -53,13 +54,18 @@ class RdockConformerGenerator(ConformerGenerator):
             pool.starmap(
                 self._run_rdock,
                 [
-                    (i, f"{self._working_dir}/{rdock_random}.sd", f"{rdock_random}")
+                    (
+                        i,
+                        f"{self._working_dir}/{rdock_random}.sd",
+                        f"{rdock_random}",
+                        self._minimize_only,
+                    )
                     for i in range(math.ceil(self._numconf / 10))
                 ],
             )
 
         self._combine_files(f"{rdock_random}")
-        # shutil.rmtree(f"{rdock_random}")
+        shutil.rmtree(f"{rdock_random}")
 
     def _get_tethered(
         self, out
@@ -193,7 +199,7 @@ END_SECTION
             rbdock_params.write(params)
 
     @staticmethod
-    def _run_rdock(i, ligand, output, nruns=10):
+    def _run_rdock(i, ligand, output, min_only=False, nruns=10):
         """
         rbdock – the rDock docking engine itself.
 
@@ -210,9 +216,9 @@ END_SECTION
             "-r",
             "rbdock.prm",
             "-p",
-            "dock.prm",
+            "dock.prm" if not min_only else "minimise.prm",
             "-n",
-            str(nruns),
+            str(nruns * int(not min_only)),
             "-s",
             str(i),
         ]
