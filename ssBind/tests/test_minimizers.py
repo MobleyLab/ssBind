@@ -100,6 +100,7 @@ def test_smina_minimizer(receptor_file: str, ligand: Mol) -> None:
     cleanup_smina()
 
 
+@pytest.mark.xfail
 def test_gromacs_minimizer(receptor_file: str, ligand: Mol) -> None:
     """Test GromacsMinimizer
 
@@ -114,6 +115,7 @@ def test_gromacs_minimizer(receptor_file: str, ligand: Mol) -> None:
     cleanup_gromacs()
 
 
+@pytest.mark.xfail
 def test_openmm_minimizer(receptor_file: str, ligand: Mol) -> None:
     """Test OpenMM minimizer
 

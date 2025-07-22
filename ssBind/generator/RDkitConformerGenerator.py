@@ -4,7 +4,7 @@ from copy import deepcopy
 from typing import Dict
 
 from rdkit import Chem
-from rdkit.Chem.AllChem import ConstrainedEmbed, EmbedMolecule
+from rdkit.Chem.AllChem import EmbedMolecule
 from rdkit.Chem.rdchem import Mol
 from rdkit.Chem.rdForceFieldHelpers import UFFGetMoleculeForceField
 from rdkit.Chem.rdMolAlign import AlignMol
