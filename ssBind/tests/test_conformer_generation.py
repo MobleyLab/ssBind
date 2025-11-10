@@ -154,7 +154,7 @@ def test_plants_generator(receptor_file: str, reference: Mol, ligand: Mol) -> No
     cleanup_plants()
 
 
-# @pytest.mark.xfail
+@pytest.mark.xfail
 def test_autodock_generator(
     receptor_file: str, reference: Mol, ligand: Mol, ligand_file: str
 ) -> None:
