@@ -1,0 +1,14 @@
+.DS_Store
+.R*
+build/
+*.egg-info
+.pytest
+.pytest_cache/
+**/__pycache__/
+*.py[cod]
+pytest.ini
+.git
+.DS_Store
+pytest-hpc3
+dist/
+LOCAL/
