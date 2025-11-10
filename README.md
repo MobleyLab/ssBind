@@ -9,10 +9,11 @@ I would like to thank authors of PLANTS molecular docking software for making PL
 ## Installation (from source)
 
 ```bash
-$ git clone https://github.com/suleymanselim/ssBind
+$ git clone https://github.com/MobleyLab/ssBind
 $ cd ssBind
 $ pip install .
 ```
+Depending on the docking software, additional programs may need to be installed via conda or compiled from source.
 
 ## Available options
 
