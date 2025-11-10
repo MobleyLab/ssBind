@@ -18,34 +18,35 @@ def cleanup(files: List[str]) -> None:
             pass
 
 
-def test_e2e(receptor_file, reference_file, ligand_file, ligand) -> None:
+def test_e2e(
+    receptor_file, reference_file, receptor_file_mol2, ligand_file, ligand
+) -> None:
 
     files_to_remove = [
         "conformers.sdf",
+        "conformers.pdb",
         "ligand.sdf",
         "minimized_conformers.sdf",
         "Scores.csv",
-        "cluster_info.csv",
-        "conf_info.csv",
-        "PC1-PC2.svg",
-        "PC1-PC3.svg",
-        "PC2-PC3.svg",
-    ] + [f"model_{i+1}.sdf" for i in range(11)]
+        "complex.pdb",
+        "rbcavity.log",
+        "rbdock_cav1.grd",
+        "rbdock.as",
+        "rbdock.log",
+        "rbdock.prm",
+        "selected_conformers.sdf",
+    ]
 
     root_dir = Path(__file__).parents[1]
     script = os.path.join(root_dir, "run_ssBind.py")
 
     cleanup(files_to_remove)
-    ligand_to_sdf(ligand)
 
-    success = os.system(
-        f"python {script} --reference {reference_file} --ligand {ligand_file} --receptor {receptor_file} --generator rdkit "
-        f"--minimize smina --clustering PCA --numconf 20",
+    success = 0
+    success = success + os.system(
+        f"python {script} --reference {reference_file} --ligand {ligand_file} --receptor {receptor_file} --generator autodock-hydrated "
+        f"--numconf 200"  # --seeds selected_conformers.sdf",
     )
-    # success = os.system(
-    #     f"python {script} --reference {reference_file} --ligand {ligand_file} --receptor {receptor_file} --generator autodock "
-    #     f"--clustering PCA --numconf 250",
-    # )
 
     assert success == 0
     cleanup(files_to_remove)

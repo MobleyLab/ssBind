@@ -1,5 +1,6 @@
 import ast
 import os
+import subprocess
 
 from openff.toolkit import Molecule, Topology
 from openmm import (
@@ -26,10 +27,10 @@ class OpenMMinimizer:
 
     def __init__(
         self,
-        receptor_file: str,
         query_molecule: Mol,
+        receptor_file: str,
         proteinFF: str = "amber14/protein.ff14SB.xml, amber14/tip3p.xml",
-        FF: str = "gaff",
+        FF: str = "smirnoff",
         **kwargs,
     ) -> None:
         """Initialize OpenMM minimization

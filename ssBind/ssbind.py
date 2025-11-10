@@ -57,6 +57,8 @@ class SSBIND:
             self._generator = PlantsConformerGenerator(**self._kwargs)
         elif generator_type == "autodock":
             self._generator = AutodockGenerator(**self._kwargs)
+        elif generator_type == "autodock-hydrated":
+            self._generator = AutodockGenerator(**self._kwargs, hydrate=True)
         else:
             raise Exception(f"Invalid conformer generator: {generator_type}")
 
@@ -89,7 +91,7 @@ class SSBIND:
             return
         elif minimizer_type == "gromacs":
             self._minimizer = GromacsMinimizer(**self._kwargs)
-        elif minimizer_type == "smina":
+        elif minimizer_type.startswith("smina"):
             self._minimizer = SminaMinimizer(**self._kwargs)
         elif minimizer_type == "openmm":
             self._minimizer = OpenMMinimizer(**self._kwargs)
@@ -115,18 +117,12 @@ class SSBIND:
         # initialize timer
         start = time.time()
 
-        posepicker_type = self._kwargs.get("posepicker")
+        no_selection = self._kwargs.get("no_selection")
 
-        if posepicker_type == "Off":
+        if no_selection:
             return
-        elif posepicker_type == "Default":
-            self._posepicker = SimplePosePicker(**self._kwargs)
-        elif posepicker_type == "PCA":
-            self._posepicker = PCAPosePicker(**self._kwargs)
-        elif posepicker_type == "Torsion":
-            self._posepicker = TorsionPosePicker(**self._kwargs)
         else:
-            raise Exception(f"Invalid clustering method: {posepicker_type}")
+            self._posepicker = SimplePosePicker(**self._kwargs)
 
         self._posepicker.pick_poses(conformers, scores)
 

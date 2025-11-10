@@ -115,7 +115,6 @@ def test_gromacs_minimizer(receptor_file: str, ligand: Mol) -> None:
     cleanup_gromacs()
 
 
-@pytest.mark.xfail
 def test_openmm_minimizer(receptor_file: str, ligand: Mol) -> None:
     """Test OpenMM minimizer
 
@@ -126,8 +125,8 @@ def test_openmm_minimizer(receptor_file: str, ligand: Mol) -> None:
     cleanup_openmm()
     ligand_to_sdf(ligand)
     ligand.SetProp("fixed_atoms", "(1,2,3)")
-    rdDistGeom.EmbedMultipleConfs(ligand, 10)
-    minimizer = OpenMMinimizer(receptor_file, ligand)
+    # rdDistGeom.EmbedMultipleConfs(ligand, 10)
+    minimizer = OpenMMinimizer(ligand, receptor_file)
     minimize_and_test(minimizer, ligand)
     u = mda.Universe("complex.pdb", "minimized_conformers.dcd")
     cleanup_openmm()

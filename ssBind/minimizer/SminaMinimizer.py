@@ -98,12 +98,12 @@ class SminaMinimizer:
             for mol in suppl:
                 mols.append(mol)
 
-        mols_sorted = sorted(
-            mols, key=lambda mol: float(mol.GetProp("minimizedAffinity"))
-        )
+        # mols_sorted = sorted(
+        #     mols, key=lambda mol: float(mol.GetProp("minimizedAffinity"))
+        # )
 
         with Chem.SDWriter(output_sdf_path) as writer:
-            for mol in mols_sorted:
+            for mol in mols:
                 writer.write(mol)
 
         df = LoadSDF(output_sdf_path, sanitize=True)[["minimizedAffinity"]]

@@ -1,8 +1,12 @@
 #!/usr/bin/python
 import argparse
+import copy
 import multiprocessing as mp
 import os
+import shutil
+from typing import List
 
+import pandas as pd
 from rdkit import Chem
 from rdkit.Chem import MolFromMol2File
 
@@ -10,6 +14,12 @@ from ssBind import SSBIND
 from ssBind.generator import *
 
 # Substructure-based alternative BINDing modes generator for protein-ligand systems
+
+
+def none_or_str(value):
+    if value == "None":
+        return None
+    return value
 
 
 def ParserOptions():
@@ -28,27 +38,12 @@ def ParserOptions():
         help="PDB file for receptor protein",
         required=True,
     )
-    # TODO remove
-    parser.add_argument(
-        "--degree",
-        dest="degree",
-        type=float,
-        help="Amount, in degrees, to enumerate torsions by (default 60.0)",
-        default=60.0,
-    )
     parser.add_argument(
         "--cutoff",
         dest="cutoff_dist",
         type=float,
         help="Cutoff for eliminating any conformer close to protein within cutoff by (default 1.5 A)",
         default=1.5,
-    )
-    parser.add_argument(
-        "--rms",
-        dest="rms",
-        type=float,
-        help="Only keep structures with RMS > CUTOFF (default 0.2 A)",
-        default=0.2,
     )
     parser.add_argument(
         "--cpu",
@@ -60,7 +55,16 @@ def ParserOptions():
         "--generator",
         dest="generator",
         help="Choose a method for the conformer generation.",
-        choices=["angle", "rdkit", "plants", "rdock", "autodock"],
+        choices=[
+            "angle",
+            "rdkit",
+            "plants",
+            "rdock",
+            "autodock",
+            "autodock-hydrated",
+            None,
+        ],
+        type=none_or_str,
     )
     parser.add_argument(
         "--numconf", dest="numconf", type=int, help="Number of confermers", default=1000
@@ -69,37 +73,51 @@ def ParserOptions():
         "--minimize",
         dest="minimize",
         help="Perform minimization (recommended: smina with rdkit). local means minimization of the reference only.",
-        choices=["gromacs", "smina", "openmm", "local"],
+        choices=["smina", "smina-score", "gromacs", "openmm", "local", None],
+        type=none_or_str,
     )
     parser.add_argument(
-        "--hydrate",
-        dest="autodock_hydrated",
-        help="Hydrated docking with Autodock",
+        "--selectionStrategy",
+        dest="selectionStrategy",
+        help="Pose selection strategy post clustering",
+        choices=["score", "similarity", "mixed"],
+        default="mixed",
+    )
+    parser.add_argument(
+        "--outputPoses",
+        dest="outputPoses",
+        help="Number of poses to select",
+        type=int,
+        default=5,
+    )
+    parser.add_argument(
+        "--no_selection",
+        dest="no_selection",
+        help="Omit clustering and selection",
         action="store_true",
-    )
-    parser.add_argument(
-        "--clustering",
-        dest="posepicker",
-        help="Conformer clustering algorithm",
-        choices=["Off", "Default", "PCA", "Torsion"],
-        default="Default",
     )
     parser.add_argument(
         "--flexDist",
         dest="flexDist",
         type=int,
-        help="Residues having side-chain flexibility taken into account. Take an interger to calculate closest residues around the ligand",
+        help="(PLANTS only) Residues having side-chain flexibility taken into account. Take an interger to calculate closest residues around the ligand",
     )
     parser.add_argument(
         "--flexList",
         dest="flexList",
         type=str,
-        help="Residues having side-chain flexibility taken into account. Take a list of residues for flexibility",
+        help="(PLANTS only) Residues having side-chain flexibility taken into account. Take a list of residues for flexibility",
     )
     parser.add_argument(  # for plants
         "--no_prepare_ligand",
         dest="no_prepare_ligand",
         action="store_true",
+        help="(PLANTS only) omit ligand preparation by SPORES",
+    )
+    parser.add_argument(
+        "--seeds",
+        dest="seeds",
+        help="SDF with ligand structures to seed docking",
     )
     args = parser.parse_args()
     return args
@@ -107,9 +125,71 @@ def ParserOptions():
 
 def main(args, nprocs):
 
-    reference_substructure = MolFromMol2File(args.reference, cleanupSubstructures=False)
+    if args.ligand.endswith("mol2"):
+        query_molecule = MolFromMol2File(
+            args.ligand, cleanupSubstructures=True, removeHs=False
+        )
+    elif args.ligand.endswith("sdf"):
+        query_molecule = next(Chem.SDMolSupplier(args.ligand, removeHs=False))
+    else:
+        raise Exception("Ligand must be MOL2 or SDF!")
+
+    if args.seeds is None:
+        run_ssbind(args, nprocs, query_molecule)
+    else:  # batch mode
+
+        seeds = [mol for mol in Chem.SDMolSupplier(args.seeds, removeHs=False)]
+
+        if len(seeds) == 0:
+            seeds = [query_molecule]
+
+        args_confgen = copy.deepcopy(args)
+        args_confgen.numconf = int(args.numconf / len(seeds))
+        args_confgen.minimize = None
+        args_confgen.no_selection = True
+
+        for i, seed in enumerate(seeds):
+            args_confgen.do_receptor_prep = i == 0
+            args_confgen.iseed = i
+            run_ssbind(args_confgen, nprocs, seed)
+            shutil.move("conformers.sdf", f"conformers_{i}.sdf")
+            shutil.move("Scores.csv", f"Scores_{i}.csv")
+
+        combine_confs_and_scores(seeds)
+
+        # 3) Cluster conformers together - take query as reference
+        args_cluster = copy.deepcopy(args)
+        args_cluster.generator = None
+        run_ssbind(args_cluster, nprocs, query_molecule)
+
+
+def combine_confs_and_scores(seeds: List[Chem.Mol]):
+    confs = []
+    for i in range(len(seeds)):
+        confs = confs + [
+            mol for mol in Chem.SDMolSupplier(f"conformers_{i}.sdf", sanitize=False)
+        ]
+    writer = Chem.SDWriter("conformers.sdf")
+    writer.SetKekulize(False)
+    for conf in confs:
+        writer.write(conf)
+    writer.close()
+
+    dfs = [
+        pd.read_csv(f"Scores_{i}.csv", index_col=[0], parse_dates=[0])
+        for i in range(len(seeds))
+    ]
+    finaldf = pd.concat(dfs)
+    finaldf.to_csv("Scores.csv")
+
+    for i in range(len(seeds)):
+        os.remove(f"conformers_{i}.sdf")
+        os.remove(f"Scores_{i}.csv")
+
+
+def run_ssbind(args, nprocs, query_molecule):
+    reference_substructure = MolFromMol2File(args.reference, cleanupSubstructures=True)
     reference_substructure = Chem.RemoveAllHs(reference_substructure)
-    query_molecule = MolFromMol2File(args.ligand, cleanupSubstructures=False)
 
     receptor_extension = os.path.splitext(args.receptor)[1].lower()
     if args.generator == "rdock" and receptor_extension != ".mol2":
@@ -128,7 +208,8 @@ def main(args, nprocs):
 
     ssbind = SSBIND(**kwargs)
 
-    ssbind.generate_conformers()
+    if args.generator is not None:
+        ssbind.generate_conformers()
 
     if args.minimize is not None:
         ssbind.run_minimization(conformers="conformers.sdf")

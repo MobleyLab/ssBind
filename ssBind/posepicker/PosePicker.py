@@ -1,3 +1,5 @@
+import resource
+from abc import abstractmethod
 from typing import List, Tuple
 
 import MDAnalysis as mda
@@ -14,6 +16,7 @@ class PosePicker:
         self._nprocs = kwargs.get("nprocs", 1)
         self._complex_topology = kwargs.get("complex_topology", "complex.pdb")
 
+    @abstractmethod
     def pick_poses(
         self, conformers: str = "conformers.sdf", csv_scores: str = "Scores.csv"
     ) -> None:
@@ -47,11 +50,19 @@ class PosePicker:
             flex = True
 
         else:
+
+            confs = [mol for mol in Chem.SDMolSupplier(conformers, removeHs=False)]
+            if None in confs:  # happens if something doesn't sanitize
+                confs = [
+                    mol
+                    for mol in Chem.SDMolSupplier(
+                        conformers, sanitize=False, removeHs=False
+                    )
+                ]
             try:
-                confs = Chem.SDMolSupplier(conformers)
+                u = mda.Universe(confs[0], confs)
             except:
-                confs = Chem.SDMolSupplier(conformers, sanitize=False)
-            u = mda.Universe(confs[0], confs)
+                u = None
             select = "not (name H*)"
             flex = False
 
@@ -69,3 +80,9 @@ class PosePicker:
             float: RMSD in A
         """
         return rmsdwrapper(Molecule.from_rdkit(ref), Molecule.from_rdkit(mol))[0]
+
+    @staticmethod
+    def _calculate_rms(params):
+        i, j, cid_i, cid_j = params
+        rms = PosePicker._rmsd(cid_i, cid_j)
+        return i, j, rms

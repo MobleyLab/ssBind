@@ -4,11 +4,14 @@ from copy import deepcopy
 from typing import List, Tuple
 
 import MDAnalysis as mda
+import numpy as np
 from MDAnalysis.analysis import distances
 from rdkit import Chem
 from rdkit.Chem import AllChem, rdFMCS, rdmolops
-from rdkit.Chem.Draw import rdMolDraw2D
 from rdkit.Chem.rdchem import Mol
+from rdkit.Chem.rdFMCS import BondCompare
+from rdkit.Chem.rdForceFieldHelpers import UFFGetMoleculeForceField
+from rdkit.Geometry import Point3D
 
 
 class ConformerGenerator:
@@ -18,7 +21,7 @@ class ConformerGenerator:
         receptor_file: str,
         query_molecule: Mol,
         reference_substructure: Mol,
-        **kwargs
+        **kwargs,
     ) -> None:
         self._receptor_file = os.path.abspath(receptor_file)
         self._query_molecule = query_molecule
@@ -34,6 +37,7 @@ class ConformerGenerator:
         self._mappingRefToLig = self._MCS_AtomMap(
             query_molecule, reference_substructure, distTol
         )
+
         self._mappingLigToRef = [(j, i) for i, j in self._mappingRefToLig]
 
         fixed_atoms = list(zip(*self._mappingLigToRef))[0]
@@ -46,7 +50,12 @@ class ConformerGenerator:
     @staticmethod
     def _MCS_AtomMap(ligand: Mol, ref: Mol, distTol: float = 1.0) -> List[Tuple[int]]:
 
-        mcs = rdFMCS.FindMCS([ligand, ref], completeRingsOnly=True, matchValences=False)
+        mcs = rdFMCS.FindMCS(
+            [ligand, ref],
+            completeRingsOnly=True,
+            matchValences=False,
+            bondCompare=BondCompare.CompareAny,
+        )
         submol = Chem.MolFromSmarts(mcs.smartsString)
 
         matches_ref = ref.GetSubstructMatches(submol, uniquify=False)
@@ -71,7 +80,7 @@ class ConformerGenerator:
 
     def _minimize(self, ligand: Mol) -> Mol:
         mcp = deepcopy(ligand)
-        ff = Chem.rdForceFieldHelpers.UFFGetMoleculeForceField(mcp, confId=0)
+        ff = UFFGetMoleculeForceField(mcp, confId=0)
         for atidx in [i for i, j in self._mappingRefToLig]:
             ff.UFFAddPositionConstraint(atidx, 0, 200)
         maxIters = 10
@@ -98,7 +107,7 @@ class ConformerGenerator:
 
         if self._steric_clash(mol):
             return 0
-        elif self._distance(self._receptor_file, mol, self._cutoff_dist):
+        if self._distance(self._receptor_file, mol, self._cutoff_dist):
             return 0
         else:
             with open("conformers.sdf", "a") as outf:
@@ -111,14 +120,10 @@ class ConformerGenerator:
     def _steric_clash(mol: Mol):
         """Identify steric clashes based on mean bond length."""
 
-        ##Identify stearic clashes based on mean bond length
-        ditancelist = rdmolops.Get3DDistanceMatrix(mol)[0]
-        for i in range(1, len(ditancelist)):
-            if ditancelist[i] < 0.5 * rdMolDraw2D.MeanBondLength(mol):
-                return True
-            else:
-                continue
-        return False
+        noh = Chem.RemoveAllHs(mol)
+        mat = rdmolops.Get3DDistanceMatrix(noh)
+        closest = float(min(mat[~np.eye(mat.shape[0], dtype=bool)]))
+        return closest < 1.0
 
     @staticmethod
     def _distance(receptor: str, ligand: Mol, cutoff: float = 1.5):
@@ -134,3 +139,31 @@ class ConformerGenerator:
         dist_array = distances.distance_array(atom1.positions, atom2.positions)
 
         return dist_array.min() < cutoff
+
+    @staticmethod
+    def _updateCoords(mol: Mol, ref: Mol) -> Mol:
+        """Fix sanitization issues by copying coords from new molecule to object
+        of input ligand (which should work). This assumes that atom order is preserved
+        (seems to be the case)
+
+        Args:
+            mol (Mol): Broken mol with coords to keep
+            ref (Mol): Query molecule
+
+        Returns:
+            Mol: Updated molecule which should sanitize
+        """
+
+        outmol = Chem.Mol(ref)
+
+        props = mol.GetPropsAsDict()
+        for propname, prop in props.items():
+            outmol.SetProp(propname, str(prop))
+
+        pos = mol.GetConformer().GetPositions()
+        conf = outmol.GetConformer()
+        for i in range(outmol.GetNumAtoms()):
+            x, y, z = pos[i]
+            conf.SetAtomPosition(i, Point3D(x, y, z))
+
+        return outmol

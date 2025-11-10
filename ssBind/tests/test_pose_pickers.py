@@ -18,7 +18,7 @@ def conformers_file(path: str) -> str:
     Returns:
         str: Path to conformers
     """
-    return os.path.join(path, "data/minimized_conformers.sdf")
+    return os.path.join(path, "data/conformers.sdf")
 
 
 @pytest.fixture
@@ -41,7 +41,7 @@ def models() -> List[str]:
     Returns:
         List[str]: Filenames (in current directory)
     """
-    return [f"model_{i+1}.sdf" for i in range(11)]
+    return [f"model_{i+1}.sdf" for i in range(10)]
 
 
 def cleanup(files: List[str]) -> None:
@@ -107,7 +107,7 @@ def test_torsion_posepicker(
 
 def test_simple_posepicker(conformers_file: str, scores_file: str, ligand: Mol) -> None:
 
-    files = ["conformers.pdb", "selected_conformers.sdf"]
+    files = ["selected_conformers.sdf"]
 
     cleanup(files)
     picker = SimplePosePicker(
@@ -116,4 +116,6 @@ def test_simple_posepicker(conformers_file: str, scores_file: str, ligand: Mol) 
         selectionStrategy="mixed",
     )
     picker.pick_poses(conformers_file, scores_file)
+    for f in files:
+        assert os.path.isfile(f)
     cleanup(files)

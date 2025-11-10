@@ -1,7 +1,6 @@
 import math
 import multiprocessing as mp
 import os
-import re
 import shutil
 import subprocess
 import uuid
@@ -9,8 +8,6 @@ from contextlib import closing
 
 from rdkit import Chem, RDLogger
 from rdkit.Chem.PandasTools import LoadSDF
-from rdkit.Chem.rdchem import Mol
-from rdkit.Geometry import Point3D
 
 from ssBind.generator import ConformerGenerator
 
@@ -32,6 +29,8 @@ class RdockConformerGenerator(ConformerGenerator):
         self._working_dir = kwargs.get(
             "working_dir", os.path.join(curdir, str(uuid.uuid4()))
         )
+        self._do_receptor_prep = kwargs.get("do_receptor_prep", True)
+        self._iseed = kwargs.get("iseed", 0)  # only use this for seeded runs
 
     def generate_conformers(self) -> None:
         """
@@ -46,21 +45,24 @@ class RdockConformerGenerator(ConformerGenerator):
         sdwriter.close()
 
         self._get_tethered(rdock_random)
-        self._prepare_receptor(
-            RECEPTOR_FILE=self._receptor_file, REF_MOL=f"{self._working_dir}/ref.sdf"
-        )
+        if self._do_receptor_prep:
+            self._prepare_receptor(
+                RECEPTOR_FILE=self._receptor_file,
+                REF_MOL=f"{self._working_dir}/ref.sdf",
+            )
 
         with closing(mp.Pool(processes=self._nprocs)) as pool:
+            numconf = math.ceil(self._numconf / 10)
             pool.starmap(
                 self._run_rdock,
                 [
                     (
-                        i,
+                        i + self._iseed * numconf,
                         f"{self._working_dir}/{rdock_random}.sd",
                         f"{rdock_random}",
                         self._minimize_only,
                     )
-                    for i in range(math.ceil(self._numconf / 10))
+                    for i in range(numconf)
                 ],
             )
 
@@ -249,9 +251,9 @@ END_SECTION
 
         for num in numeric_list:
             sd_path = os.path.join(dockdir, f"{num}.sd")
-            suppl = Chem.SDMolSupplier(sd_path, sanitize=False)
+            suppl = Chem.SDMolSupplier(sd_path, sanitize=False, removeHs=False)
             mols = mols + [
-                self._updateCoords(mol, self._query_molecule)
+                mol  # self._updateCoords(mol, self._query_molecule)
                 for mol in suppl
                 if mol is not None
             ]
@@ -262,35 +264,6 @@ END_SECTION
             for mol in mols_sorted:
                 writer.write(mol)
 
-        df = LoadSDF(conformer_file, sanitize=True)[["SCORE"]]
+        df = LoadSDF(conformer_file, sanitize=False)[["SCORE"]]
         df = df.rename(columns={"SCORE": "Score"})
         df.to_csv("Scores.csv", index_label="Index")
-
-    @staticmethod
-    def _updateCoords(mol: Mol, ref: Mol) -> Mol:
-        """Fix sanitization issues by copying coords from new molecule to object
-        of input ligand (which should work). This assumes that atom order is preserved
-        (seems to be the case)
-
-        Args:
-            mol (Mol): Broken mol with coords to keep
-            ref (Mol): Query molecule
-
-        Returns:
-            Mol: Updated molecule which should sanitize
-        """
-
-        outmol = Chem.Mol(ref)
-        outmol = Chem.RemoveAllHs(outmol)
-
-        props = mol.GetPropsAsDict()
-        for propname, prop in props.items():
-            outmol.SetProp(propname, str(prop))
-
-        pos = mol.GetConformer().GetPositions()
-        conf = outmol.GetConformer()
-        for i in range(outmol.GetNumAtoms()):
-            x, y, z = pos[i]
-            conf.SetAtomPosition(i, Point3D(x, y, z))
-
-        return outmol

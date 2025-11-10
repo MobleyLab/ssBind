@@ -1,11 +1,13 @@
 import itertools
+import multiprocessing as mp
 import subprocess
+from contextlib import closing
 from typing import List
 
 import numpy as np
 import pandas as pd
 import pytraj as pt
-from rdkit.Chem import SDWriter
+from rdkit import Chem
 from rdkit.Chem.rdShapeHelpers import ShapeTanimotoDist
 from rdkit.ML.Cluster import Butina
 from sklearn.cluster import HDBSCAN
@@ -20,7 +22,7 @@ class SimplePosePicker(PosePicker):
         super().__init__(**kwargs)
 
         self._query_molecule = kwargs.get("query_molecule")
-        self._cluster = kwargs.get("clusteringMethod", "butina")  # or hdbscan
+        self._cluster = kwargs.get("clusteringMethod", "hdbscan")  # or butina
         self._distThresh = kwargs.get(
             "distThresh", 0.5
         )  # dist threshold for clustering (both)
@@ -28,6 +30,10 @@ class SimplePosePicker(PosePicker):
             "selectionStrategy", "mixed"
         )  # or "score" "similarity"
         self._numPoses = kwargs.get("outputPoses", 5)  # number of poses to output
+        self._excludeSingletons = kwargs.get(
+            "excludeSignletons", self._strategy == "similarity"
+        )  # exclude 1-molecule clusters in hdbscan
+        self._nprocs = kwargs.get("nprocs", 1)
 
     def pick_poses(
         self, conformers: str = "conformers.sdf", csv_scores: str = "Scores.csv"
@@ -41,19 +47,18 @@ class SimplePosePicker(PosePicker):
             csv_scores (str, optional): Sorted file with scores for each conformer. Defaults to "Scores.csv".
         """
 
-        _, confs, _, _ = self._process_inputs(conformers)
-        mols = [c for c in confs]
+        _, mols, _, _ = self._process_inputs(conformers)
+        mols_noh = [Chem.RemoveAllHs(mol, sanitize=False) for mol in mols]
 
-        cmd = [
-            "obabel",
-            conformers,
-            "-O",
-            "conformers.pdb",
-        ]
-        subprocess.run(cmd, check=False)
+        pdist = self._calc_rmsd(mols_noh)
 
-        output_file = "selected_conformers.sdf"
-        pdist = self._calc_rmsd_pytraj("conformers.pdb")
+        # if conformers.endswith("dcd"):
+        #     pdist = self._calc_rmsd_pytraj(conformers)
+        # else:
+        #     cmd = ["obabel", conformers, "-O", "conformers.pdb", "-d"]  # remove Hs
+        #     subprocess.run(cmd, check=False)
+
+        #     pdist = self._calc_rmsd_pytraj("conformers.pdb")
 
         if pdist.shape[0] == 1:
             cluster_ids = [0]
@@ -66,9 +71,13 @@ class SimplePosePicker(PosePicker):
                 raise Exception(f"Unknown clustering method: {self._cluster}")
 
         # get scores
-        scores = pd.read_csv(csv_scores)["Score"]
+        if self._strategy != "similarity":
+            scores = pd.read_csv(csv_scores)["Score"]
+        else:
+            scores = None
         if self._strategy in ["similarity", "mixed"]:
-            similarity = [ShapeTanimotoDist(mol, self._query_molecule) for mol in mols]
+            lig_noh = Chem.RemoveHs(self._query_molecule)
+            similarity = [ShapeTanimotoDist(mol, lig_noh) for mol in mols_noh]
         else:  # so we don't waste time calculating it
             similarity = [0] * len(mols)
 
@@ -96,10 +105,16 @@ class SimplePosePicker(PosePicker):
         else:
             raise Exception(f"Unknown pose selection method: {self._strategy}")
 
+        self.df = df
+        self.topN = topN
+
         # write poses to sdf
-        with SDWriter(output_file) as writer:
-            for mol in topN.mols:
-                writer.write(mol)
+        output_file = "selected_conformers.sdf"
+        writer = Chem.SDWriter(output_file)
+        writer.SetKekulize(False)
+        for mol in topN.mols:
+            writer.write(mol)
+        writer.close()
 
     def _find_bestscoring_poses(
         self, df: pd.DataFrame, score: str, num: int
@@ -115,7 +130,10 @@ class SimplePosePicker(PosePicker):
         Returns:
             pd.DataFrame: Dataframe with N rows for the top poses.
         """
-        topN = df[df.groupby("cluster")[score].transform("min") == df[score]]
+        df_copy = df[df.cluster >= 0]  # exclude hdbscan singletons if needed
+        topN = df_copy[
+            df_copy.groupby("cluster")[score].transform("min") == df_copy[score]
+        ]
         topN = topN.drop_duplicates(subset=["cluster", score])
         top_N = topN.sort_values(by=score)[: min(num, topN.shape[0])].reset_index()
         return top_N
@@ -138,7 +156,10 @@ class SimplePosePicker(PosePicker):
 
         start = len(set(hdb.labels_)) - 1
         c = itertools.count()
-        cluster_ids = [l if l >= 0 else start + next(c) for l in hdb.labels_]
+        if self._excludeSingletons:
+            cluster_ids = hdb.labels_
+        else:
+            cluster_ids = [l if l >= 0 else start + next(c) for l in hdb.labels_]
         return cluster_ids
 
     def _cluster_Butina(self, pdist: np.ndarray) -> List[int]:
@@ -167,9 +188,31 @@ class SimplePosePicker(PosePicker):
         )
         return cluster_ids
 
+    def _calc_rmsd(self, mols: List[Chem.Mol]) -> np.ndarray:
+        """Calculate symmetry-corrected RMSD with the spyrmsd package. This is slow but works.
+
+        Args:
+            mols (List[Chem.Mol]): Conformers
+
+        Returns:
+            np.ndarray: RMSD matrix
+        """
+        N = len(mols)
+        tasks = [(i, j, mols[i], mols[j]) for i in range(N) for j in range(i)]
+        with closing(mp.Pool(processes=self._nprocs)) as pool:
+            results = pool.map(self._calculate_rms, tasks)
+        dists = np.empty((N, N))
+        for i, j, rms in results:
+            dists[i, j] = rms
+            dists[j, i] = rms
+        for i in range(N):
+            dists[i, i] = 0
+        return dists
+
     def _calc_rmsd_pytraj(self, conformers: str) -> np.ndarray:
-        """Calculate RMSD matrix using PyTraj. A symmetry-corrected RMSD calculation
+        """DEPRECATED Calculate RMSD matrix using PyTraj. A symmetry-corrected RMSD calculation
         is attmepted first, falling back to the standard RMSD upon failure.
+        This is much faster than spyrmsd, but was found to sometimes be quite wrong.
 
         Args:
             conformers (str): File containing conformers. Must be PDB, as Pytraj does not
@@ -179,8 +222,12 @@ class SimplePosePicker(PosePicker):
             np.ndarray: RMSD matrix
         """
 
-        try:
+        if conformers.endswith("pdb"):
             ptraj = pt.load(conformers)
+        else:  # dcd
+            ptraj = pt.load(conformers, "complex.pdb")["(:UNK)"]
+
+        try:
             pdist = np.empty((ptraj.n_frames, ptraj.n_frames))
             for i in range(ptraj.n_frames):
                 pdist[i] = pt.symmrmsd(ptraj, ref=i, fit=False)
@@ -199,7 +246,6 @@ class SimplePosePicker(PosePicker):
             print(
                 f"Warning: Pytraj symmrmsd failed, no symmetry correction for clustering."
             )
-            ptraj = pt.load(conformers)
             pdist = np.empty((ptraj.n_frames, ptraj.n_frames))
             for i in range(ptraj.n_frames):
                 pdist[i] = pt.rmsd(ptraj, ref=i, nofit=True)

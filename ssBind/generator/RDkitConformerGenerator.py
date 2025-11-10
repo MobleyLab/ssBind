@@ -1,6 +1,5 @@
 import multiprocessing as mp
 from contextlib import closing
-from copy import deepcopy
 from typing import Dict
 
 from rdkit import Chem
@@ -19,7 +18,7 @@ class RDkitConformerGenerator(ConformerGenerator):
         receptor_file: str,
         query_molecule: Mol,
         reference_substructure: Mol,
-        **kwargs: Dict
+        **kwargs: Dict,
     ) -> None:
         super().__init__(
             receptor_file, query_molecule, reference_substructure, **kwargs
@@ -34,7 +33,7 @@ class RDkitConformerGenerator(ConformerGenerator):
                 writer.write(self._query_molecule)
             return
 
-        maxRepeats = 100
+        maxRepeats = 20
         torsionPrefs = True
 
         for repeat in range(maxRepeats):
@@ -86,41 +85,13 @@ class RDkitConformerGenerator(ConformerGenerator):
         Args:
             seed (int): Random seed for constrained embedding.
         """
-        ligand = Chem.AddHs(self._query_molecule, addCoords=True)
+        # ligand = Chem.AddHs(self._query_molecule, addCoords=True)
         ligEmbed = self._ConstrainedEmbed(
-            ligand, randomseed=seed + 1, torsionPrefs=torsionPrefs
+            self._query_molecule, randomseed=seed + 1, torsionPrefs=torsionPrefs
         )
-        outmol = Chem.RemoveHs(ligEmbed)
+        # outmol = Chem.RemoveHs(ligEmbed)
 
-        self._filtering(outmol)
-
-    def _embed2(self, ligand: Mol, seed: int = -1, torsionPrefs: bool = True) -> Mol:
-        """Use distance geometry (RDKit EmbedMolecule) to generate a conformer of ligand
-        tethering to the reference structure (coordMap).
-
-        Args:
-            ligand (Mol): Molecule to generate conformer
-            seed (int, optional): Random seed for embedding. Defaults to -1.
-
-        Returns:
-            Mol: New conformer of ligand
-        """
-
-        coordMap = {}
-        ligConf = ligand.GetConformer(0)
-        for _, ligIdx in self._mappingRefToLig:
-            ligPtI = ligConf.GetAtomPosition(ligIdx)
-            coordMap[ligIdx] = ligPtI
-
-        l_embed = deepcopy(ligand)
-        EmbedMolecule(
-            l_embed,
-            coordMap=coordMap,
-            randomSeed=seed,
-            useExpTorsionAnglePrefs=torsionPrefs,
-        )
-        self._alignToRef(l_embed)
-        return l_embed
+        self._filtering(ligEmbed)
 
     def _ConstrainedEmbed(
         self,
@@ -130,7 +101,7 @@ class RDkitConformerGenerator(ConformerGenerator):
         coreConfId=-1,
         randomseed=2342,
         getForceField=UFFGetMoleculeForceField,
-        **kwargs
+        **kwargs,
     ):
 
         core = self._reference_substructure
@@ -155,7 +126,7 @@ class RDkitConformerGenerator(ConformerGenerator):
             coordMap=coordMap,
             randomSeed=randomseed,
             useExpTorsionAnglePrefs=torsionPrefs,
-            **kwargs
+            **kwargs,
         )
         if ci < 0:
             raise ValueError("Could not embed molecule.")
@@ -193,6 +164,7 @@ class RDkitConformerGenerator(ConformerGenerator):
             while more and n:
                 more = ff.Minimize(energyTol=1e-4, forceTol=1e-3)
                 n -= 1
+
             # realign
             rms = AlignMol(outmol, core, atomMap=algMap)
         outmol.SetProp("EmbedRMS", str(rms))

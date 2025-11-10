@@ -90,7 +90,7 @@ def ligand(ligand_file: str) -> Mol:
     Returns:
         Mol: Ligand
     """
-    return Chem.MolFromMol2File(ligand_file)
+    return Chem.MolFromMol2File(ligand_file, removeHs=False)
 
 
 def canonSmiles(mol: Mol) -> str:

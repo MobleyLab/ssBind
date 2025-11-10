@@ -24,8 +24,7 @@ class AutodockGenerator(ConformerGenerator):
         super().__init__(
             receptor_file, query_molecule, reference_substructure, **kwargs
         )
-        self._ligand_file = os.path.abspath(kwargs.get("ligand"))
-        self._hydrated = kwargs.get("autodock_hydrated", False)
+        self._hydrated = kwargs.get("hydrate", False)
         self._ligand_padding = kwargs.get("autodock_ligand_padding", 5)  # 5A
         self._rmstol = kwargs.get("autodock_rmstol", 0.1)
         self._curdir = kwargs.get("curdir", os.getcwd())
@@ -38,6 +37,9 @@ class AutodockGenerator(ConformerGenerator):
         if os.path.exists(self._working_dir):
             shutil.rmtree(self._working_dir)
         os.makedirs(self._working_dir)
+
+        with Chem.SDWriter(os.path.join(self._working_dir, "ligand.sdf")) as writer:
+            writer.write(self._query_molecule)
 
         self._mk_prepare_receptor()
         self._run_autogrid4()
@@ -71,7 +73,7 @@ class AutodockGenerator(ConformerGenerator):
             "-g",
             "-p",
             "--box_enveloping",
-            self._ligand_file,
+            "ligand.sdf",
             "--padding",
             str(self._ligand_padding),
             "--allow_bad_res",
@@ -98,7 +100,7 @@ class AutodockGenerator(ConformerGenerator):
         subprocess.run(cmd, cwd=self._working_dir, check=True)
 
     def _mk_prepare_ligand(self) -> None:
-        cmd = ["mk_prepare_ligand.py", "-i", self._ligand_file, "-o", "ligand.pdbqt"]
+        cmd = ["mk_prepare_ligand.py", "-i", "ligand.sdf", "-o", "ligand.pdbqt"]
         if self._hydrated:
             cmd.append("-w")
         subprocess.run(

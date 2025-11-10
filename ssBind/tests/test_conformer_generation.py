@@ -10,15 +10,6 @@ from ssBind.tests.generic import *
 def cleanup() -> None:
     """Remove conformers file created during testing"""
 
-    try:
-        os.remove("conformers.sdf")
-    except OSError:
-        pass
-
-
-def cleanup_autodock() -> None:
-    """Remove conformers file created during testing"""
-
     for f in ["conformers.sdf", "Scores.csv"]:
         try:
             os.remove(f)
@@ -56,6 +47,7 @@ def cleanup_plants() -> None:
         "SPORES.log",
         "ligand.mol2",
         "ligand.pdb",
+        "ligand.sdf",
         "receptor.mol2",
     ]:
         try:
@@ -97,7 +89,7 @@ def test_rdkit_generator(receptor_file: str, reference: Mol, ligand: Mol) -> Non
         nprocs=2,
         numconf=20,
     )
-    generate_and_test(generator, 24)
+    generate_and_test(generator, 20)
     cleanup()
 
 
@@ -119,7 +111,7 @@ def test_angle_generator(receptor_file: str, reference: Mol, ligand: Mol) -> Non
         numconf=20,
         degree=120,
     )
-    generate_and_test(generator, 4)
+    generate_and_test(generator, 3)
     cleanup()
 
 
@@ -162,6 +154,7 @@ def test_plants_generator(receptor_file: str, reference: Mol, ligand: Mol) -> No
     cleanup_plants()
 
 
+# @pytest.mark.xfail
 def test_autodock_generator(
     receptor_file: str, reference: Mol, ligand: Mol, ligand_file: str
 ) -> None:
@@ -173,7 +166,7 @@ def test_autodock_generator(
         ligand (Mol): ligand.mol2 ligand structure
     """
 
-    cleanup_autodock()
+    cleanup()
     generator = AutodockGenerator(
         receptor_file,
         ligand,
@@ -182,7 +175,7 @@ def test_autodock_generator(
         nprocs=2,
         numconf=20,
         working_dir="test_autodock",
-        autodock_hydrated=True,
+        autodock_hydrated=False,
     )
     generate_and_test(generator, 20)
-    cleanup_autodock()
+    cleanup()

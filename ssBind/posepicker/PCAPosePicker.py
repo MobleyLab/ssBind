@@ -175,9 +175,3 @@ class PCAPosePicker(PosePicker):
                 y_coord = df.loc[df.Index == coord_index, f"{pcs[j]}"]
                 ax.text(x_coord, y_coord, f"{index+1}")
                 fig.savefig(f"{pcs[i]}-{pcs[j]}.svg", format="svg")
-
-    @staticmethod
-    def _calculate_rms(params):
-        i, j, cid_i, cid_j = params
-        rms = PCAPosePicker._rmsd(cid_i, cid_j)
-        return i, j, rms

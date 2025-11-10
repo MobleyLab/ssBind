@@ -21,7 +21,7 @@ class PlantsConformerGenerator(ConformerGenerator):
 
     def __init__(
         self,
-        query_molecule: str,
+        query_molecule: Chem.Mol,
         reference_substructure: str,
         receptor_file: str,
         flexDist: int = None,
@@ -38,6 +38,20 @@ class PlantsConformerGenerator(ConformerGenerator):
         self._no_prepare_ligand = no_prepare_ligand
         self._working_dir = kwargs.get("working_dir", os.path.join(os.getcwd(), "tmp"))
         self._ligand_file = kwargs.get("ligand", None)
+        self._do_receptor_prep = kwargs.get("do_receptor_prep", True)
+
+        self._reference_substructure = self._replace_boron(self._reference_substructure)
+        self._query_molecule = self._replace_boron(self._query_molecule)
+
+    @staticmethod
+    def _replace_boron(mol: Chem.Mol) -> Chem.Mol:
+        # PLANTS cannot handle boron, replace it with C
+        for atom in mol.GetAtoms():
+            if atom.GetAtomicNum() == 5:
+                atom.SetAtomicNum(6)
+
+        Chem.SanitizeMol(mol)
+        return mol
 
     def generate_conformers(self) -> None:
         """
@@ -61,7 +75,8 @@ class PlantsConformerGenerator(ConformerGenerator):
         # Handle flexibility for PLANTS
         flex_res = self._handle_flexibility()
 
-        self._SPORES(self._receptor_file, "receptor.mol2", "settypes")
+        if self._do_receptor_prep:
+            self._SPORES(self._receptor_file, "receptor.mol2", "settypes")
 
         with closing(mp.Pool(processes=self._nprocs)) as pool:
             pool.starmap(
@@ -108,6 +123,8 @@ class PlantsConformerGenerator(ConformerGenerator):
 
         ligand = self._query_molecule
         reflig = self._reference_substructure
+        with Chem.SDWriter("ligand.sdf") as writer:
+            writer.write(ligand)
 
         if not self._no_prepare_ligand:
             pdwriter = Chem.PDBWriter("ligand.pdb", flavor=4)
@@ -116,21 +133,25 @@ class PlantsConformerGenerator(ConformerGenerator):
 
             self._SPORES("ligand.pdb", "ligand.mol2", "complete")
         else:
-            shutil.copyfile(os.path.abspath(self._ligand_file), "ligand.mol2")
+            with open(os.path.abspath(self._ligand_file), "r") as f:
+                lines = f.readlines()
+            lines[1] = "ligand\n"
+            with open("ligand.mol2", "w") as f:
+                f.writelines(lines)
 
         ligcenter = self._molecule_center(reflig)
 
-        ringAtoms = []
+        constrAtoms = []
         for pair in self._mappingRefToLig:
             if any(pair[1] in sublist for sublist in self._GetRingSystems(ligand)):
-                ringAtoms.append(pair[1])
+                constrAtoms.append(pair[1])
 
         conf = ligand.GetConformer()
-        if not ringAtoms:
-            ringAtoms = [t[1] for t in self._mappingRefToLig]
+        if not constrAtoms:
+            constrAtoms = [t[1] for t in self._mappingRefToLig]
 
         dis = []
-        for atom in ringAtoms:
+        for atom in constrAtoms:
             dis.append(
                 {
                     atom: math.sqrt(
@@ -210,8 +231,7 @@ write_rescored_structures 1
 #Fixed Scaffold
 ligand_file ligand.mol2 fixed_scaffold_{fixedAtom}
 
-#Flexible Side-chains
-"""
+#Flexible Side-chains"""
 
         success = False
 
@@ -392,6 +412,7 @@ ligand_file ligand.mol2 fixed_scaffold_{fixedAtom}
                         pass
                     mol = next(Chem.SDMolSupplier(path + ".sdf", sanitize=False))
             if mol is not None:
+                # molNoH = Chem.RemoveHs(mol, sanitize=False)
                 sdf_writer.write(mol)
         sdf_writer.close()
 
