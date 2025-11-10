@@ -74,7 +74,18 @@ rDock needs to be installed separately (compiled from [source](https://github.co
 Autodock restrains the atoms from the substructure by adding a steep linear bias around their reference positions. 
 Autodock needs to compiled from [source](https://github.com/ccsb-scripps/AutoDock-GPU), and renamed to an executable ``autodock`` included in PATH.
 ```console
-run_ssBind.py --reference reference.mol2 --ligand ligand.mol2 --receptor receptor.pdb --generator autodock 
+run_ssBind.py --reference reference.pdb --ligand ligand.mol2 --receptor receptor.pdb --generator autodock 
+```
+#### 5. Seeded docking
+This needs to be done in two steps, first to generate the seeds, and second to run docking starting from the seeds.
+1) Genreate seeds - the option ``smina-score`` for minimization ensures that smina is only used for scoring (based on the minimized structures) but the conformers themselves are not minimized (so that the tethered atoms are not moved).
+```console
+run_ssBind.py --reference reference.mol2 --ligand ligand.mol2 --receptor receptor.pdb --generator rdkit --minimize smina-score 
+```
+2) Run docking - the option ``seeds`` takes the SDF file with the conformers used as seeds.
+```console
+mv selected_conformers.sdf seeds.sdf
+run_ssBind.py --reference reference.mol2 --ligand ligand.mol2 --receptor receptor.pdb --generator plants --seeds seeds.sdf
 ```
 
 ## Python tutorial
